@@ -162,6 +162,23 @@ def intraday_spread(
     return (intra_rets * long_w).sum(axis=1) - (intra_rets * short_w).sum(axis=1)
 
 
+def compute_contraction_betas(rets: pd.DataFrame, window: int = _VOL_WIN) -> pd.Series:
+    """
+    Beta of each instrument vs the equal-weight market return.
+    Used as a contraction factor indicator — values > 1 mean the instrument
+    amplifies market moves, < 1 means it dampens them.
+    """
+    instruments = [i for i in ACTIVE_INSTRUMENTS if i in rets.columns]
+    if not instruments:
+        return pd.Series(dtype=float)
+    recent = rets[instruments].tail(window)
+    mkt = recent.mean(axis=1)
+    mkt_var = float(mkt.var())
+    if mkt_var == 0:
+        return pd.Series(1.0, index=instruments)
+    return pd.Series({i: float(recent[i].cov(mkt)) / mkt_var for i in instruments})
+
+
 def portfolio_stats(port_ret: pd.Series) -> dict:
     if port_ret.empty or port_ret.isna().all():
         nan = float('nan')

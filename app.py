@@ -8,14 +8,18 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from calculations import (
-    correlation_matrix, crossing_signals, intraday_spread, linear_trend,
-    portfolio_returns, portfolio_stats, returns,
-    rolling_nd_returns, rolling_volatility, scaling_vectors,
+    compute_contraction_betas, correlation_matrix, crossing_signals,
+    intraday_spread, linear_trend, portfolio_returns, portfolio_stats,
+    returns, rolling_nd_returns, rolling_volatility, scaling_vectors,
     velocity_acceleration,
 )
 from config import ACTIVE_INSTRUMENTS, DISPLAY_NAMES, PARAMS, SPREADS
 from data import force_intraday_refresh, force_refresh, load_intraday_prices, load_prices
-from journal import close_trade, delete_trade, load_trades, open_trade
+from account import compute_daily_funding, compute_spread_costs, load_account, save_account
+from journal import (
+    close_trade, delete_trade, load_trades, open_trade,
+    partial_close_leg, trade_live_pnl,
+)
 from saved import delete_portfolio, load_saved, save_portfolio
 from search import METRIC_NAMES, METRICS, estimate_combinations, run_search
 from stake_calc import compute_stakes, pnl_scenario
@@ -129,6 +133,148 @@ with tab1:
     st.subheader("Prices & Signals")
     _tbl(_dn(price_tbl))
 
+    # ── Account Overview ──────────────────────────────────────────────────────
+    st.subheader("Account Overview")
+    _acct         = load_account()
+    _all_trades   = load_trades()
+    _open_t       = [t for t in _all_trades if t['status'] == 'open']
+    _closed_t     = [t for t in _all_trades if t['status'] == 'closed']
+    _cur_px       = {k: float(v) for k, v in latest_prices.items() if pd.notna(v)}
+    _realised     = sum(t.get('realised_pnl', 0.0) or 0.0 for t in _closed_t)
+    _mm_pnl       = sum(trade_live_pnl(t, _cur_px) for t in _open_t)
+    _total_equity = _acct['starting_capital'] + _realised + _mm_pnl
+    _free_equity  = _total_equity - _acct['margin']
+    _funding      = compute_daily_funding(_open_t, _cur_px, _acct['long_rate'], _acct['short_rate'])
+    _spread_costs = compute_spread_costs(_open_t)
+
+    ae1, ae2, ae3 = st.columns(3)
+    ae1.metric("Starting Capital", f"£{_acct['starting_capital']:,.0f}")
+    ae2.metric("Total Equity",     f"£{_total_equity:,.0f}",
+               delta=f"£{(_total_equity - _acct['starting_capital']):+,.0f}")
+    ae3.metric("Free Equity",      f"£{_free_equity:,.0f}",
+               delta=f"Margin £{_acct['margin']:,.0f}")
+
+    ae4, ae5, ae6 = st.columns(3)
+    ae4.metric("Realised P&L",     f"£{_realised:+,.0f}")
+    ae5.metric("Unrealised (MM)",  f"£{_mm_pnl:+,.0f}")
+    ae6.metric("Open Positions",   str(len(_open_t)))
+
+    ae7, ae8 = st.columns(2)
+    ae7.metric("Est. Daily Funding", f"£{_funding:+,.2f}",
+               help="Long funding cost minus short rebate (annualised rates / 365)")
+    ae8.metric("Open Spread Costs",  f"£{_spread_costs:,.2f}",
+               help="Round-trip bid/ask cost if all open positions closed now")
+
+    with st.expander("Account settings"):
+        ac1, ac2, ac3, ac4 = st.columns(4)
+        _new_cap  = ac1.number_input("Starting capital (£)", value=_acct['starting_capital'],
+                                     step=1000.0, key='acct_cap')
+        _new_lr   = ac2.number_input("Long rate",  value=_acct['long_rate'],
+                                     step=0.001, format='%.4f', key='acct_lr')
+        _new_sr   = ac3.number_input("Short rate", value=_acct['short_rate'],
+                                     step=0.001, format='%.4f', key='acct_sr')
+        _new_marg = ac4.number_input("Margin (£)", value=_acct['margin'],
+                                     step=500.0, key='acct_marg')
+        if st.button("Save account settings", key='acct_save'):
+            save_account({'starting_capital': _new_cap, 'long_rate': _new_lr,
+                          'short_rate': _new_sr, 'margin': _new_marg})
+            st.success("Saved.")
+            st.rerun()
+
+    st.markdown("---")
+
+    # ── Signal Scanner ────────────────────────────────────────────────────────
+    st.subheader("Signal Scanner")
+    _tol_sd      = PARAMS['xing_tolerance_sd']
+    _n_fit       = PARAMS['linear_fit_points']
+    _contractions = compute_contraction_betas(rets)
+    _margin_rate  = 0.10
+    _scan_rows   = []
+    for _inst in ACTIVE_INSTRUMENTS:
+        if _inst not in rets.columns or _inst not in scalings.columns:
+            continue
+        _s = (rets[_inst] * scalings[_inst]).dropna()
+        if len(_s) < 10:
+            continue
+        _cum   = (1 + _s).cumprod()
+        _va    = velocity_acceleration(_s)
+        _cs    = crossing_signals(_s)
+        _trend = linear_trend(_cum, _n_fit)
+        _vol   = float(_s.std())
+        _tvr   = (abs(_trend['slope']) / _vol) if (_vol > 0 and pd.notna(_trend.get('slope'))) else 0.0
+        _vel   = float(_va['velocity'].iloc[-1])    if pd.notna(_va['velocity'].iloc[-1])    else 0.0
+        _acc   = float(_va['acceleration'].iloc[-1]) if pd.notna(_va['acceleration'].iloc[-1]) else 0.0
+        _csd   = float(_cs['distance_sd'].iloc[-1])  if pd.notna(_cs['distance_sd'].iloc[-1]) else 0.0
+        _roll  = rolling_nd_returns(_s).iloc[-1]
+        _beta  = float(_contractions.get(_inst, float('nan')))
+
+        # Pre-trade recommendation (item 1)
+        _px   = float(latest_prices.get(_inst, float('nan')))
+        _hv   = float(latest_vols.get(_inst, float('nan')))
+        _sc2  = float(latest_scalings.get(_inst, 0.0))
+        if not (np.isnan(_px) or np.isnan(_hv) or _hv == 0 or _px == 0):
+            _rec_stake  = round(float(target_exposure) / (_px * _hv) * _sc2, 2)
+            _rec_margin = round(_rec_stake * _px * _margin_rate, 0)
+            _rec_hpnl   = round(_rec_stake * _px * _hv * abs(_csd), 0)
+        else:
+            _rec_stake = _rec_margin = _rec_hpnl = 0.0
+        _direction = 'BUY' if _csd < -_tol_sd else ('SELL' if _csd > _tol_sd else '')
+
+        _scan_rows.append({
+            'Instrument': DISPLAY_NAMES.get(_inst, _inst),
+            'TVR':        f'{_tvr:.3f}',
+            'Velocity':   f'{_vel:+.4f}',
+            'Accel.':     f'{_acc:+.4f}',
+            'Cur. SDs':   f'{_csd:+.2f}',
+            '1D':  f"{float(_roll['1D']):+.2%}" if pd.notna(_roll['1D']) else '',
+            '2D':  f"{float(_roll['2D']):+.2%}" if pd.notna(_roll['2D']) else '',
+            '3D':  f"{float(_roll['3D']):+.2%}" if pd.notna(_roll['3D']) else '',
+            '5D':  f"{float(_roll['5D']):+.2%}" if pd.notna(_roll['5D']) else '',
+            'Signal':    '✓' if abs(_csd) > _tol_sd else '',
+            'Beta':      f'{_beta:.2f}' if pd.notna(_beta) else '',
+            'Direction': _direction,
+            'Stake':     f'{_rec_stake:.1f}' if _rec_stake > 0 else '',
+            'Margin':    f'£{_rec_margin:,.0f}' if _rec_margin > 0 else '',
+            'Hyp P&L':   f'£{_rec_hpnl:,.0f}' if (_rec_hpnl > 0 and _direction) else '',
+        })
+    if _scan_rows:
+        _scan_df = pd.DataFrame(_scan_rows)
+        _scan_df['_abs'] = _scan_df['Cur. SDs'].apply(lambda x: abs(float(x)) if x else 0.0)
+        _scan_df = _scan_df.sort_values('_abs', ascending=False).drop(columns=['_abs'])
+        _tbl(_scan_df, show_index=False)
+
+    # ── Multi-Timeframe Range Signals (item 4) ────────────────────────────────
+    st.markdown("---")
+    st.subheader("Multi-Timeframe Range Signals")
+    st.caption("Percentile of current price within each rolling window. HIGH/LOW = top or bottom 10%.")
+    _range_rows = []
+    for _inst in ACTIVE_INSTRUMENTS:
+        if _inst not in prices.columns:
+            continue
+        _px_ser = prices[_inst].dropna()
+        if len(_px_ser) < 262:
+            continue
+        _cur_px2 = float(_px_ser.iloc[-1])
+        _d_hi = float(_px_ser.tail(262).max()); _d_lo = float(_px_ser.tail(262).min())
+        _w_hi = float(_px_ser.tail(5).max());   _w_lo = float(_px_ser.tail(5).min())
+        _m_hi = float(_px_ser.tail(21).max());  _m_lo = float(_px_ser.tail(21).min())
+        _dp = (_cur_px2 - _d_lo) / (_d_hi - _d_lo) if _d_hi > _d_lo else 0.5
+        _wp = (_cur_px2 - _w_lo) / (_w_hi - _w_lo) if _w_hi > _w_lo else 0.5
+        _mp = (_cur_px2 - _m_lo) / (_m_hi - _m_lo) if _m_hi > _m_lo else 0.5
+        _range_rows.append({
+            'Instrument': DISPLAY_NAMES.get(_inst, _inst),
+            'D %ile':  f'{_dp:.0%}',
+            'D Range': 'HIGH' if _dp >= 0.9 else ('LOW' if _dp <= 0.1 else '-'),
+            'W %ile':  f'{_wp:.0%}',
+            'W Range': 'HIGH' if _wp >= 0.9 else ('LOW' if _wp <= 0.1 else '-'),
+            'M %ile':  f'{_mp:.0%}',
+            'M Range': 'HIGH' if _mp >= 0.9 else ('LOW' if _mp <= 0.1 else '-'),
+        })
+    if _range_rows:
+        _tbl(pd.DataFrame(_range_rows), show_index=False)
+
+    st.markdown("---")
+
     # Spread summary metrics
     st.subheader("Spread Performance")
     any_selected = any(long_flags.values()) or any(short_flags.values())
@@ -232,6 +378,63 @@ with tab2:
             f"Total crossing signals in history: **{n_signals}**  |  "
             f"Current distance: **{last_dist:.2f} SDs**"
         )
+
+        # ── Pair Statistics ───────────────────────────────────────────────────
+        from scipy.stats import norm as _norm
+        st.subheader("Pair Statistics")
+
+        _roll_s = rolling_nd_returns(port_ret)
+        _stat_rows = []
+        for _n in [1, 2, 3, 5]:
+            _col  = f'{_n}D'
+            _ser  = _roll_s[_col].dropna()
+            if _ser.empty:
+                continue
+            _avg  = float(_ser.mean())
+            _sd   = float(_ser.std())
+            _cur  = float(_roll_s[_col].iloc[-1]) if pd.notna(_roll_s[_col].iloc[-1]) else float('nan')
+            _csds = (_cur - _avg) / _sd if _sd > 0 and pd.notna(_cur) else float('nan')
+            _stat_rows.append({
+                'Window':      _col,
+                'Avg':         f'{_avg:+.2%}',
+                '1 SD':        f'{_sd:.2%}',
+                'Max':         f'{float(_ser.max()):+.2%}',
+                'Min':         f'{float(_ser.min()):+.2%}',
+                'Current':     f'{_cur:+.2%}' if pd.notna(_cur) else '',
+                'Current SDs': f'{_csds:+.2f}' if pd.notna(_csds) else '',
+            })
+        if _stat_rows:
+            _tbl(pd.DataFrame(_stat_rows), show_index=False)
+
+        st.markdown("**Volatility by timeframe**")
+        _dv  = float(port_ret.std())
+        _wv  = float(port_ret.rolling(5).sum().std())  if len(port_ret) >= 5  else float('nan')
+        _mv  = float(port_ret.rolling(21).sum().std()) if len(port_ret) >= 21 else float('nan')
+        _vc1, _vc2, _vc3 = st.columns(3)
+        _vc1.metric("Daily 1 SD",   f'{_dv:.2%}')
+        _vc2.metric("Weekly 1 SD",  f'{_wv:.2%}'  if pd.notna(_wv) else 'N/A')
+        _vc3.metric("Monthly 1 SD", f'{_mv:.2%}' if pd.notna(_mv) else 'N/A')
+
+        st.markdown("**Spread distribution (1-day)**")
+        _ds = port_ret.dropna()
+        if len(_ds) >= 10:
+            _em = float(_ds.mean())
+            _es = float(_ds.std())
+            _c1 = float(_ds.iloc[-1])
+            _cz = (_c1 - _em) / _es if _es > 0 else 0.0
+            _dist_rows = []
+            for _nsd in [1.0, 1.5, 2.0, 2.5, 3.0]:
+                _dist_rows.append({
+                    'N SDs': f'{_nsd:.1f}',
+                    'Emp. P(>+N)':  f'{float((_ds > _em + _nsd * _es).mean()):.1%}',
+                    'Emp. P(<-N)':  f'{float((_ds < _em - _nsd * _es).mean()):.1%}',
+                    'Gaussian':     f'{2 * (1 - _norm.cdf(_nsd)):.1%}',
+                })
+            _tbl(pd.DataFrame(_dist_rows), show_index=False)
+            st.caption(
+                f"Current 1-day: {_c1:+.2%}  |  Z-score: {_cz:+.2f} SDs  |  "
+                f"Mean: {_em:+.2%}  |  1 SD: {_es:.2%}"
+            )
     else:
         st.info("Select instruments in the sidebar to see trend analysis.")
 
@@ -341,6 +544,66 @@ with tab4:
         )
     else:
         st.info("Select instruments in the sidebar to see portfolio performance.")
+
+    # ── P&L Attribution — Today ───────────────────────────────────────────────
+    st.subheader("P&L Attribution — Today")
+
+    _REGIONS = {
+        'EU':   ['UKX', 'CBK', 'CEY', 'CFR', 'CMD', 'CEI', 'COI'],
+        'US':   ['CPH', 'CTN', 'CTB'],
+        'ASIA': ['CRM', 'CIL'],
+    }
+    _today_ret = rets.iloc[-1]
+    _open_t4   = [t for t in load_trades() if t['status'] == 'open']
+
+    _net_stakes: dict = {inst: 0.0 for inst in ACTIVE_INSTRUMENTS}
+    for _t4 in _open_t4:
+        for _leg in _t4.get('legs', []):
+            _pct = _leg.get('pct_open', 0.0)
+            _bi  = _leg.get('buy_instrument',  '')
+            _si  = _leg.get('sell_instrument', '')
+            if _bi in _net_stakes:
+                _net_stakes[_bi] += _leg['buy_stake']  * _pct
+            if _si in _net_stakes:
+                _net_stakes[_si] -= _leg['sell_stake'] * _pct
+
+    _attr_rows = []
+    for _region, _insts in _REGIONS.items():
+        for _inst in _insts:
+            if _inst not in _today_ret.index:
+                continue
+            _stake   = _net_stakes.get(_inst, 0.0)
+            _ret_d   = float(_today_ret[_inst]) if pd.notna(_today_ret.get(_inst)) else 0.0
+            _price   = float(latest_prices.get(_inst, 0.0)) if pd.notna(latest_prices.get(_inst)) else 0.0
+            from config import POINT_SIZES as _PS2
+            _contrib = _stake * _price * _ret_d * _PS2.get(_inst, 1.0)
+            _attr_rows.append({
+                'Region':     _region,
+                'Instrument': DISPLAY_NAMES.get(_inst, _inst),
+                'Net Stake':  round(_stake, 2),
+                "Today %":    f'{_ret_d:+.2%}',
+                'P&L':        round(_contrib, 0),
+            })
+
+    if _attr_rows:
+        _attr_df = pd.DataFrame(_attr_rows)
+        _tbl(_attr_df, show_index=False)
+
+        _region_totals = _attr_df.groupby('Region')['P&L'].sum()
+        _rc = st.columns(len(_region_totals) + 1)
+        for _ci, (_reg, _val) in enumerate(sorted(_region_totals.items())):
+            _rc[_ci].metric(_reg, f"£{_val:+,.0f}")
+        _rc[-1].metric("Total today", f"£{_attr_df['P&L'].sum():+,.0f}")
+
+        _fig_attr = px.bar(
+            _attr_df[_attr_df['P&L'] != 0],
+            x='Instrument', y='P&L', color='Region',
+            title="P&L Attribution by Instrument — Today",
+        )
+        _fig_attr.update_layout(height=320)
+        st.plotly_chart(_fig_attr, use_container_width=True)
+    else:
+        st.caption("No open positions — open trades in the Journal to see attribution.")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -548,7 +811,8 @@ with tab6:
             if spread.empty:
                 st.warning("No matching instruments found in intraday data.")
             else:
-                hist_vol = port_ret.tail(_TDY).std() if not port_ret.empty else 0.0
+                hist_vol    = port_ret.tail(_TDY).std() if not port_ret.empty else 0.0
+                hist_vol_5d = port_ret.rolling(5).sum().tail(_TDY).std() if len(port_ret) >= 5 else 0.0
 
                 current_val = float(spread.iloc[-1])
                 current_sd  = (current_val / hist_vol) if hist_vol > 0 else 0.0
@@ -574,6 +838,12 @@ with tab6:
                     mode='markers', marker=dict(size=10, color='orange', symbol='circle'),
                     name='Current',
                 ))
+                if hist_vol_5d > 0:
+                    sd5_pct = hist_vol_5d * 100
+                    fig.add_hline(y= sd5_pct, line_dash='dot', line_color='lightsalmon',
+                                  annotation_text='+5D SD', annotation_position='top left')
+                    fig.add_hline(y=-sd5_pct, line_dash='dot', line_color='lightseagreen',
+                                  annotation_text='-5D SD', annotation_position='bottom left')
                 fig.add_hline(y= sd_pct, line_dash='dash', line_color='crimson',
                               annotation_text='+1 SD', annotation_position='top right')
                 fig.add_hline(y=-sd_pct, line_dash='dash', line_color='seagreen',
@@ -587,7 +857,33 @@ with tab6:
                     showlegend=False,
                 )
                 st.plotly_chart(fig, use_container_width=True)
-                st.caption(f"Last data point: {spread.index[-1]}  |  Historical daily 1-SD: ±{hist_vol:.2%}")
+                st.caption(f"Last data point: {spread.index[-1]}  |  Historical daily 1-SD: ±{hist_vol:.2%}  |  5D SD: ±{hist_vol_5d:.2%}")
+
+                # ── Intraday Volatility Tracker (item 6) ──────────────────────
+                st.subheader("Intraday Volatility by Instrument")
+                _sel_insts = [
+                    i for i in ACTIVE_INSTRUMENTS
+                    if (long_flags.get(i) or short_flags.get(i)) and i in intraday.columns
+                ]
+                if _sel_insts:
+                    _ivol_rows = []
+                    for _inst in _sel_insts:
+                        _ir = intraday[_inst].pct_change().dropna()
+                        if _ir.empty:
+                            continue
+                        _tv = float(_ir.std())
+                        _hv2 = float(latest_vols.get(_inst, float('nan')))
+                        _ratio = (_tv / _hv2) if (pd.notna(_hv2) and _hv2 > 0) else float('nan')
+                        _ivol_rows.append({
+                            'Instrument': DISPLAY_NAMES.get(_inst, _inst),
+                            'Side':       'Long' if long_flags.get(_inst) else 'Short',
+                            'Today Vol':  f'{_tv*100:.3f}%',
+                            'Hist Vol':   f'{_hv2*100:.2f}%' if pd.notna(_hv2) else 'N/A',
+                            'Ratio':      f'{_ratio:.2f}x' if pd.notna(_ratio) else 'N/A',
+                            'Flag':       'HIGH VOL' if (pd.notna(_ratio) and _ratio > 1.5) else 'normal',
+                        })
+                    if _ivol_rows:
+                        _tbl(pd.DataFrame(_ivol_rows), show_index=False)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -596,16 +892,13 @@ with tab6:
 with tab7:
     st.header("Trade Journal")
 
-    # ── helper: compute cumulative spread level for a set of flags ───────────
-    def _cum_spread(lf: dict, sf: dict) -> float:
-        pr = portfolio_returns(rets, scalings, lf, sf)
-        if pr.empty or pr.isna().all():
-            return 1.0
-        return float((1 + pr).cumprod().iloc[-1])
+    _j_cur_px = {k: float(v) for k, v in latest_prices.items() if pd.notna(v)}
 
-    # ── session state for close confirmation ─────────────────────────────────
-    if 'pending_close_id' not in st.session_state:
-        st.session_state['pending_close_id'] = None
+    st.session_state.setdefault('pending_close_id', None)
+    st.session_state.setdefault('j_legs', [
+        {'buy_instrument':   ACTIVE_INSTRUMENTS[0], 'buy_entry_price': 0.0, 'buy_stake': 1.0,
+         'sell_instrument':  ACTIVE_INSTRUMENTS[1], 'sell_entry_price': 0.0, 'sell_stake': 1.0}
+    ])
 
     # ════ OPEN POSITIONS ══════════════════════════════════════════════════════
     st.subheader("Open Positions")
@@ -615,103 +908,195 @@ with tab7:
         st.caption("No open positions.")
     else:
         for trade in open_trades:
-            current = _cum_spread(trade['long_flags'], trade['short_flags'])
-            sign    = 1 if trade['direction'] == 'Buy' else -1
-            unreal  = (current - trade['entry_spread']) * trade['exposure'] * sign
+            live_pnl  = trade_live_pnl(trade, _j_cur_px)
+            real_pnl  = trade.get('realised_pnl', 0.0) or 0.0
+            total_pnl = live_pnl + real_pnl
 
-            cols = st.columns([3, 2, 2, 2, 2, 1])
-            cols[0].markdown(f"**{trade['name']}**")
-            cols[0].caption(f"{trade['direction']} · opened {trade['entry_date']}")
-            cols[1].metric("Entry level", f"{trade['entry_spread']:.4f}")
-            cols[2].metric("Current level", f"{current:.4f}",
-                           delta=f"£{unreal:+,.0f}")
-            cols[3].metric("Exposure", f"£{trade['exposure']:,.0f}")
-            cols[4].metric("Unrealised P&L", f"£{unreal:+,.0f}")
+            hcols = st.columns([4, 2, 2, 2, 1])
+            hcols[0].markdown(f"**{trade['name']}**")
+            if trade.get('comments'):
+                hcols[0].caption(trade['comments'])
+            hcols[0].caption(
+                f"Opened {trade['entry_date']}  ·  "
+                f"Target £{trade.get('target_exposure', 0):,.0f}"
+            )
+            hcols[1].metric("Unrealised",  f"£{live_pnl:+,.0f}")
+            hcols[2].metric("Realised",    f"£{real_pnl:+,.0f}")
+            hcols[3].metric("Total P&L",   f"£{total_pnl:+,.0f}")
 
-            # Close / confirm flow
             if trade['id'] == st.session_state['pending_close_id']:
-                cols[5].write("")  # spacer
                 st.warning(
-                    f"Close **{trade['name']}** at {current:.4f}?  "
-                    f"Realised P&L = **£{unreal:+,.0f}**"
+                    f"Close **all legs** of **{trade['name']}** at current prices?  "
+                    f"Estimated P&L = **£{total_pnl:+,.0f}**"
                 )
-                ca, cb = st.columns(2)
-                if ca.button("✅ Confirm", key=f"confirm_{trade['id']}"):
-                    close_trade(trade['id'], current, date.today().isoformat())
+                _ca, _cb = st.columns(2)
+                if _ca.button("✅ Confirm close all", key=f"confirm_{trade['id']}"):
+                    close_trade(trade['id'], _j_cur_px, date.today().isoformat())
                     st.session_state['pending_close_id'] = None
                     st.rerun()
-                if cb.button("Cancel", key=f"cancel_{trade['id']}"):
+                if _cb.button("Cancel", key=f"cancel_{trade['id']}"):
                     st.session_state['pending_close_id'] = None
                     st.rerun()
             else:
-                if cols[5].button("Close", key=f"close_{trade['id']}"):
+                if hcols[4].button("Close all", key=f"close_{trade['id']}"):
                     st.session_state['pending_close_id'] = trade['id']
                     st.rerun()
+
+            with st.expander(f"Legs — {len(trade['legs'])} pair(s)"):
+                from config import POINT_SIZES as _JPTS
+                for leg in trade['legs']:
+                    bi, si   = leg['buy_instrument'], leg['sell_instrument']
+                    b_cur    = _j_cur_px.get(bi, leg['buy_entry_price'])
+                    s_cur    = _j_cur_px.get(si, leg['sell_entry_price'])
+                    leg_live = (
+                        (b_cur - leg['buy_entry_price'])  * leg['buy_stake']  * leg['pct_open'] * _JPTS.get(bi, 1.0)
+                      - (s_cur - leg['sell_entry_price']) * leg['sell_stake'] * leg['pct_open'] * _JPTS.get(si, 1.0)
+                    )
+                    lc = st.columns([3, 3, 2, 2])
+                    lc[0].markdown(
+                        f"**Buy** {DISPLAY_NAMES.get(bi, bi)}  "
+                        f"@ {leg['buy_entry_price']:,.1f} × {leg['buy_stake']}"
+                    )
+                    lc[1].markdown(
+                        f"**Sell** {DISPLAY_NAMES.get(si, si)}  "
+                        f"@ {leg['sell_entry_price']:,.1f} × {leg['sell_stake']}"
+                    )
+                    lc[2].metric("Live P&L", f"£{leg_live:+,.0f}")
+                    lc[3].metric("% Open", f"{leg['pct_open']*100:.0f}%")
+
+                    if leg['pct_open'] > 1e-6:
+                        with st.expander(f"Partial close — Leg {leg['leg_id']}"):
+                            pc1, pc2, pc3, pc4 = st.columns(4)
+                            pct_slider = pc1.slider(
+                                "% of open to close", 10, 100, 100, 10,
+                                key=f"pc_pct_{trade['id']}_{leg['leg_id']}"
+                            )
+                            buy_ep  = pc2.number_input(
+                                f"Exit {DISPLAY_NAMES.get(bi, bi)}",
+                                value=round(b_cur, 1), step=1.0,
+                                key=f"pc_buy_{trade['id']}_{leg['leg_id']}"
+                            )
+                            sell_ep = pc3.number_input(
+                                f"Exit {DISPLAY_NAMES.get(si, si)}",
+                                value=round(s_cur, 1), step=1.0,
+                                key=f"pc_sell_{trade['id']}_{leg['leg_id']}"
+                            )
+                            if pc4.button(
+                                "Confirm", key=f"pc_btn_{trade['id']}_{leg['leg_id']}"
+                            ):
+                                partial_close_leg(
+                                    trade['id'], leg['leg_id'],
+                                    pct_slider / 100.0,
+                                    float(buy_ep), float(sell_ep),
+                                    date.today().isoformat(),
+                                )
+                                st.rerun()
+
+                    if leg['closes']:
+                        _cr = pd.DataFrame(leg['closes'])
+                        _cr['pnl']        = _cr['pnl'].map('£{:+,.0f}'.format)
+                        _cr['pct_closed'] = (_cr['pct_closed'] * 100).map('{:.0f}%'.format)
+                        st.dataframe(
+                            _cr.rename(columns={
+                                'date': 'Date', 'pct_closed': '% Closed',
+                                'buy_exit_price': 'Buy exit',
+                                'sell_exit_price': 'Sell exit', 'pnl': 'P&L',
+                            }),
+                            use_container_width=True, hide_index=True,
+                        )
 
             st.divider()
 
     # ════ OPEN NEW TRADE ══════════════════════════════════════════════════════
     st.subheader("Open New Trade")
 
-    # Build portfolio options: sidebar selection + saved portfolios
-    portfolio_options = {}
-    sidebar_has_selection = any(long_flags.values()) or any(short_flags.values())
-    if sidebar_has_selection:
-        long_disp  = ' | '.join(DISPLAY_NAMES.get(k, k) for k, v in long_flags.items()  if v)
-        short_disp = ' | '.join(DISPLAY_NAMES.get(k, k) for k, v in short_flags.items() if v)
-        portfolio_options['— Current sidebar selection —'] = {
-            'long_flags':   {k: v for k, v in long_flags.items()  if v},
-            'short_flags':  {k: v for k, v in short_flags.items() if v},
-            'long_display': long_disp,
-            'short_display': short_disp,
-            'name': f"{long_disp} / {short_disp}",
+    _nt1, _nt2 = st.columns([3, 1])
+    _trade_name      = _nt1.text_input("Trade name", key='j_trade_name')
+    _target_exp      = _nt2.number_input("Target 1 SD exposure (£)", value=500, step=50,
+                                          min_value=0, key='j_t_exp')
+    _trade_comments  = st.text_input("Comments (optional)", key='j_comments')
+    _entry_date_new  = st.date_input("Entry date", value=date.today(), key='j_entry_date_new')
+
+    st.markdown("**Legs** — each row is one buy / sell pair")
+
+    _legs_state    = st.session_state['j_legs']
+    _legs_to_remove = []
+
+    for _idx, _leg in enumerate(_legs_state):
+        _lc = st.columns([1, 2, 1, 1, 2, 1, 0.4])
+        _lc[0].markdown(f"**Leg {_idx + 1}**")
+
+        _bi_def = _leg.get('buy_instrument', ACTIVE_INSTRUMENTS[0])
+        _bi_idx = ACTIVE_INSTRUMENTS.index(_bi_def) if _bi_def in ACTIVE_INSTRUMENTS else 0
+        _buy_inst = _lc[1].selectbox(
+            "Buy", ACTIVE_INSTRUMENTS, index=_bi_idx,
+            key=f'j_buy_inst_{_idx}',
+            format_func=lambda x: DISPLAY_NAMES.get(x, x),
+        )
+        _bp_def = float(latest_prices.get(_buy_inst, 0.0))
+        if np.isnan(_bp_def):
+            _bp_def = 0.0
+        _buy_price = _lc[2].number_input(
+            "Price", value=round(_bp_def, 1), step=1.0, key=f'j_buy_price_{_idx}'
+        )
+        _buy_stake = _lc[3].number_input(
+            "Stake", value=float(_leg.get('buy_stake', 1.0)),
+            step=0.5, min_value=0.0, key=f'j_buy_stake_{_idx}'
+        )
+
+        _si_def = _leg.get('sell_instrument', ACTIVE_INSTRUMENTS[1] if len(ACTIVE_INSTRUMENTS) > 1 else ACTIVE_INSTRUMENTS[0])
+        _si_idx = ACTIVE_INSTRUMENTS.index(_si_def) if _si_def in ACTIVE_INSTRUMENTS else min(1, len(ACTIVE_INSTRUMENTS)-1)
+        _sell_inst = _lc[4].selectbox(
+            "Sell", ACTIVE_INSTRUMENTS, index=_si_idx,
+            key=f'j_sell_inst_{_idx}',
+            format_func=lambda x: DISPLAY_NAMES.get(x, x),
+        )
+        _sp_def = float(latest_prices.get(_sell_inst, 0.0))
+        if np.isnan(_sp_def):
+            _sp_def = 0.0
+        _sell_price = _lc[5].number_input(
+            "Price", value=round(_sp_def, 1), step=1.0, key=f'j_sell_price_{_idx}'
+        )
+        _sell_stake = _lc[6].number_input(
+            "Stake", value=float(_leg.get('sell_stake', 1.0)),
+            step=0.5, min_value=0.0, key=f'j_sell_stake_{_idx}'
+        )
+
+        _legs_state[_idx] = {
+            'buy_instrument':   _buy_inst,  'buy_entry_price':  _buy_price,  'buy_stake':  _buy_stake,
+            'sell_instrument':  _sell_inst, 'sell_entry_price': _sell_price, 'sell_stake': _sell_stake,
         }
-    for s in load_saved():
-        portfolio_options[s['name']] = {
-            'long_flags':   s['long_flags'],
-            'short_flags':  s['short_flags'],
-            'long_display': s['long_display'],
-            'short_display': s['short_display'],
-            'name': s['name'],
-        }
 
-    if not portfolio_options:
-        st.info("Select instruments in the sidebar or save a portfolio from the Search tab first.")
-    else:
-        jc1, jc2, jc3 = st.columns([3, 2, 2])
+    # Remove / Add buttons below leg rows
+    _al, _rl, _ol = st.columns([1, 1, 2])
+    if _al.button("➕ Add leg", key='j_add_leg'):
+        _legs_state.append({
+            'buy_instrument':   ACTIVE_INSTRUMENTS[0], 'buy_entry_price': 0.0, 'buy_stake': 1.0,
+            'sell_instrument':  ACTIVE_INSTRUMENTS[1] if len(ACTIVE_INSTRUMENTS) > 1 else ACTIVE_INSTRUMENTS[0],
+            'sell_entry_price': 0.0, 'sell_stake': 1.0,
+        })
+        st.rerun()
+    if _rl.button("✕ Remove last leg", key='j_remove_last') and len(_legs_state) > 1:
+        _legs_state.pop()
+        st.rerun()
 
-        with jc1:
-            chosen_key = st.selectbox("Portfolio", list(portfolio_options.keys()), key='j_portfolio')
-            chosen = portfolio_options[chosen_key]
-
-        with jc2:
-            direction = st.radio("Direction", ['Buy', 'Sell'], key='j_direction',
-                                 help="Buy = long the spread (expect long basket to outperform). Sell = reverse.")
-            exposure = st.number_input("Exposure (£)", value=500, step=50, min_value=0, key='j_exposure')
-
-        with jc3:
-            auto_level = _cum_spread(chosen['long_flags'], chosen['short_flags'])
-            entry_level = st.number_input(
-                "Entry spread level", value=round(auto_level, 4),
-                format='%.4f', step=0.0001, key='j_entry_level',
-                help="Auto-filled from current cumulative spread. Edit if opening at a different level.",
-            )
-            entry_date = st.date_input("Entry date", value=date.today(), key='j_entry_date')
-
-        st.markdown(f"Long: `{chosen['long_display']}`  ·  Short: `{chosen['short_display']}`")
-        if st.button("📝 Open Trade", type="primary", key='j_open_btn'):
+    if _ol.button("📝 Open Trade", type="primary", key='j_open_btn'):
+        if not _trade_name.strip():
+            st.error("Enter a trade name.")
+        else:
             open_trade(
-                name         = chosen['name'],
-                long_flags   = chosen['long_flags'],
-                short_flags  = chosen['short_flags'],
-                long_display = chosen['long_display'],
-                short_display= chosen['short_display'],
-                direction    = direction,
-                exposure     = float(exposure),
-                entry_spread = float(entry_level),
-                entry_date   = entry_date.isoformat(),
+                name=_trade_name.strip(),
+                legs=list(_legs_state),
+                target_exposure=float(_target_exp),
+                entry_date=_entry_date_new.isoformat(),
+                comments=_trade_comments.strip(),
             )
-            st.success(f"Trade opened: **{chosen['name']}** ({direction})")
+            st.session_state['j_legs'] = [{
+                'buy_instrument':   ACTIVE_INSTRUMENTS[0], 'buy_entry_price': 0.0, 'buy_stake': 1.0,
+                'sell_instrument':  ACTIVE_INSTRUMENTS[1] if len(ACTIVE_INSTRUMENTS) > 1 else ACTIVE_INSTRUMENTS[0],
+                'sell_entry_price': 0.0, 'sell_stake': 1.0,
+            }]
+            st.success(f"Trade opened: **{_trade_name.strip()}**")
             st.rerun()
 
     # ════ TRADE HISTORY ═══════════════════════════════════════════════════════
@@ -721,34 +1106,30 @@ with tab7:
     if not closed_trades:
         st.caption("No closed trades yet.")
     else:
-        hist_df = pd.DataFrame([{
-            'Portfolio':   t['name'],
-            'Direction':   t['direction'],
-            'Exposure':    f"£{t['exposure']:,.0f}",
-            'Entry level': f"{t['entry_spread']:.4f}",
-            'Exit level':  f"{t['exit_spread']:.4f}",
-            'Entry date':  t['entry_date'],
-            'Close date':  t['exit_date'],
-            'P&L':         f"£{t['realised_pnl']:+,.0f}",
-            '_id':         t['id'],
-        } for t in reversed(closed_trades)])
+        _total_pnl = sum(t.get('realised_pnl', 0.0) or 0.0 for t in closed_trades)
+        _wins      = sum(1 for t in closed_trades if (t.get('realised_pnl') or 0.0) >= 0)
+        st.metric("Total realised P&L", f"£{_total_pnl:+,.0f}",
+                  delta=f"{_wins}/{len(closed_trades)} winning trades")
 
-        total_pnl = sum(t['realised_pnl'] for t in closed_trades)
-        wins      = sum(1 for t in closed_trades if t['realised_pnl'] >= 0)
-        st.metric("Total realised P&L", f"£{total_pnl:+,.0f}",
-                  delta=f"{wins}/{len(closed_trades)} winning trades")
-
-        _tbl(hist_df.drop(columns=['_id']), show_index=False)
+        _hist_rows = []
+        for _t in reversed(closed_trades):
+            _hist_rows.append({
+                'Trade':      _t['name'],
+                'Legs':       len(_t.get('legs', [])),
+                'Entry date': _t['entry_date'],
+                'Close date': _t.get('exit_date', ''),
+                'P&L':        f"£{(_t.get('realised_pnl') or 0.0):+,.0f}",
+                '_id':        _t['id'],
+            })
+        _hist_df = pd.DataFrame(_hist_rows)
+        _tbl(_hist_df.drop(columns=['_id']), show_index=False)
 
         with st.expander("Delete a closed trade"):
-            del_name = st.selectbox("Select trade to delete",
-                                    [t['name'] + ' · ' + t['exit_date'] for t in reversed(closed_trades)],
-                                    key='j_del_select')
+            _del_opts = {
+                f"{_t['name']}  [{_t.get('exit_date','')}]  (id:{_t['id'][-6:]})": _t['id']
+                for _t in reversed(closed_trades)
+            }
+            _del_key = st.selectbox("Select trade", list(_del_opts.keys()), key='j_del_select')
             if st.button("🗑 Delete", key='j_del_btn'):
-                # Match by exit_date suffix
-                target_date = del_name.rsplit(' · ', 1)[-1]
-                for t in closed_trades:
-                    if t['exit_date'] == target_date and t['name'] in del_name:
-                        delete_trade(t['id'])
-                        break
+                delete_trade(_del_opts[_del_key])
                 st.rerun()

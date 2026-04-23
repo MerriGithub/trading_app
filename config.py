@@ -60,3 +60,10 @@ PARAMS = {
     'end_of_range_offset': 7,   # Days offset for range end
     'correl_smoothing': 3,      # Smoothing periods for correlation display
 }
+
+# Normal Trading Range in index points (from spreadsheet)
+NTR = {
+    'UKX': 50, 'CBK': 30, 'CEY': 300, 'CFR': 40, 'CMD': 70,
+    'CEI': 30, 'COI': 50, 'CRM': 100, 'CIL': 30,
+    'CPH': 20, 'CTN': 100, 'CTB': 100,
+}
