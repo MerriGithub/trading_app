@@ -168,7 +168,9 @@ def run_search(
                     done += 1
 
                     # Skip if the same instruments appear on both sides
-                    if set(long_combo) == set(short_combo):
+                    # Skip if any instrument appears on both sides — partial overlap
+                    # causes those legs to cancel, inflating metrics for the remainder
+                    if set(long_combo) & set(short_combo):
                         continue
 
                     sc = {k: float(v[s_i]) for k, v in batch.items()}

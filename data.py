@@ -61,7 +61,8 @@ def _fetch(start_date: str) -> pd.DataFrame | None:
 
         # Keep only known instruments in consistent order
         cols = [c for c in ACTIVE_INSTRUMENTS if c in df.columns]
-        df = df[cols].ffill().dropna(how='all')
+        # limit=3 fills holiday gaps without carrying stale prices indefinitely
+        df = df[cols].ffill(limit=3).dropna(how='all')
         df.index = pd.to_datetime(df.index)
         return df
     except Exception as e:
@@ -95,7 +96,9 @@ def load_intraday_prices(interval: str = '5m') -> pd.DataFrame | None:
         ticker_to_label = {v: k for k, v in INSTRUMENTS.items()}
         df = raw.rename(columns=ticker_to_label)
         cols = [c for c in ACTIVE_INSTRUMENTS if c in df.columns]
-        df = df[cols].ffill().dropna(how='all')
+        # Don't ffill intraday — markets close at different times and carrying a stale
+        # price forward would make closed markets appear to track open ones
+        df = df[cols].dropna(how='all')
         return df
     except Exception:
         return None

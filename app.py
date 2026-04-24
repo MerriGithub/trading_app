@@ -115,6 +115,9 @@ latest_prices   = prices.iloc[-1]
 latest_vols     = vols.iloc[-1]
 latest_scalings = scalings.iloc[-1]
 
+# Load trades once per render — reused across Dashboard, Portfolio, and Journal tabs
+all_trades = load_trades()
+
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Dashboard", "📈 Analysis", "🧮 Stake Calculator", "🗂 Portfolio", "🔍 Search", "⏱ Live", "📓 Journal"])
 
@@ -142,9 +145,8 @@ with tab1:
     # ── Account Overview ──────────────────────────────────────────────────────
     st.subheader("Account Overview")
     _acct         = load_account()
-    _all_trades   = load_trades()
-    _open_t       = [t for t in _all_trades if t['status'] == 'open']
-    _closed_t     = [t for t in _all_trades if t['status'] == 'closed']
+    _open_t       = [t for t in all_trades if t['status'] == 'open']
+    _closed_t     = [t for t in all_trades if t['status'] == 'closed']
     _cur_px       = {k: float(v) for k, v in latest_prices.items() if pd.notna(v)}
     # Realised P&L comes from closed trades; unrealised (MM) from open trades marked to market
     _realised     = sum(t.get('realised_pnl', 0.0) or 0.0 for t in _closed_t)
@@ -578,7 +580,7 @@ with tab4:
         'ASIA': ['CRM', 'CIL'],
     }
     _today_ret = rets.iloc[-1]
-    _open_t4   = [t for t in load_trades() if t['status'] == 'open']
+    _open_t4   = [t for t in all_trades if t['status'] == 'open']
 
     # Build net stake per instrument across all open trades (long = positive, short = negative)
     _net_stakes: dict = {inst: 0.0 for inst in ACTIVE_INSTRUMENTS}
@@ -934,7 +936,7 @@ with tab7:
 
     # ════ OPEN POSITIONS ══════════════════════════════════════════════════════
     st.subheader("Open Positions")
-    open_trades = [t for t in load_trades() if t['status'] == 'open']
+    open_trades = [t for t in all_trades if t['status'] == 'open']
 
     if not open_trades:
         st.caption("No open positions.")
@@ -1121,9 +1123,19 @@ with tab7:
         st.rerun()
 
     if _ol.button("📝 Open Trade", type="primary", key='j_open_btn'):
+        _errors = []
         if not _trade_name.strip():
-            st.error("Enter a trade name.")
-        else:
+            _errors.append("Enter a trade name.")
+        for _vi, _vleg in enumerate(_legs_state):
+            if _vleg['buy_instrument'] == _vleg['sell_instrument']:
+                _errors.append(f"Leg {_vi + 1}: buy and sell instrument cannot be the same.")
+            if _vleg['buy_stake'] <= 0 or _vleg['sell_stake'] <= 0:
+                _errors.append(f"Leg {_vi + 1}: stakes must be greater than zero.")
+            if _vleg['buy_entry_price'] <= 0 or _vleg['sell_entry_price'] <= 0:
+                _errors.append(f"Leg {_vi + 1}: entry prices must be greater than zero.")
+        for _e in _errors:
+            st.error(_e)
+        if not _errors:
             open_trade(
                 name=_trade_name.strip(),
                 legs=list(_legs_state),
@@ -1142,7 +1154,7 @@ with tab7:
 
     # ════ TRADE HISTORY ═══════════════════════════════════════════════════════
     st.subheader("Trade History")
-    closed_trades = [t for t in load_trades() if t['status'] == 'closed']
+    closed_trades = [t for t in all_trades if t['status'] == 'closed']
 
     if not closed_trades:
         st.caption("No closed trades yet.")
