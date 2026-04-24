@@ -1,3 +1,5 @@
+# --- Instrument Mapping ---
+# Maps internal trading codes to Yahoo Finance tickers used for data fetching
 INSTRUMENTS = {
     'UKX': '^FTSE',
     'CBK': '^FCHI',
@@ -13,7 +15,9 @@ INSTRUMENTS = {
     'CTB': '^DJI',
 }
 
+# --- Bid/Ask Spreads ---
 # Bid-ask spreads in index points (from spreadsheet row 8)
+# Used to calculate round-trip entry cost for each instrument
 SPREADS = {
     'UKX': 3.0,
     'CBK': 4.0,
@@ -29,10 +33,14 @@ SPREADS = {
     'CTB': 5.0,
 }
 
+# --- Point Sizes ---
+# Multiplier converting index points to currency P&L (all 1.0 for cash-settled indices)
 POINT_SIZES = {label: 1.0 for label in INSTRUMENTS}
 
+# All active instrument codes in insertion order — used as the canonical list throughout the app
 ACTIVE_INSTRUMENTS = list(INSTRUMENTS.keys())
 
+# --- Display Names ---
 # Standard display names used in the GUI (internal codes kept for calculations)
 DISPLAY_NAMES = {
     'UKX': 'FTSE',
@@ -48,8 +56,11 @@ DISPLAY_NAMES = {
     'CTN': 'SPX',
     'CTB': 'DJI',
 }
+# Reverse lookup: display name → internal code (used when loading saved portfolios)
 DISPLAY_NAMES_INV = {v: k for k, v in DISPLAY_NAMES.items()}
 
+# --- Algorithm Parameters ---
+# Central config for all calculation constants; changing these affects the whole app
 PARAMS = {
     'trading_days_per_year': 262,
     'vol_calc_days': 262,       # Rolling window for volatility (1 year)
@@ -61,7 +72,8 @@ PARAMS = {
     'correl_smoothing': 3,      # Smoothing periods for correlation display
 }
 
-# Normal Trading Range in index points (from spreadsheet)
+# --- Normal Trading Range ---
+# NTR in index points (from spreadsheet) — used in the pre-trade scanner to contextualise moves
 NTR = {
     'UKX': 50, 'CBK': 30, 'CEY': 300, 'CFR': 40, 'CMD': 70,
     'CEI': 30, 'COI': 50, 'CRM': 100, 'CIL': 30,

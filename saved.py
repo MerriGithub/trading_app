@@ -2,8 +2,12 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+# --- Persistence ---
+# saved_portfolios.json stores named long/short combinations with their metrics
 SAVED_PATH = Path(__file__).parent / 'saved_portfolios.json'
 
+
+# --- Load ---
 
 def load_saved() -> list[dict]:
     if not SAVED_PATH.exists():
@@ -13,6 +17,8 @@ def load_saved() -> list[dict]:
     except Exception:
         return []
 
+
+# --- Save / Upsert ---
 
 def save_portfolio(
     name: str,
@@ -32,6 +38,7 @@ def save_portfolio(
         'metrics': {k: round(float(v), 4) for k, v in metrics.items()},
         'saved_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
     }
+    # Upsert: replace an existing entry with the same name, otherwise append
     for i, s in enumerate(saved):
         if s['name'] == name:
             saved[i] = entry
@@ -40,6 +47,8 @@ def save_portfolio(
         saved.append(entry)
     SAVED_PATH.write_text(json.dumps(saved, indent=2))
 
+
+# --- Delete ---
 
 def delete_portfolio(name: str) -> None:
     saved = [s for s in load_saved() if s['name'] != name]

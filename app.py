@@ -29,6 +29,8 @@ _TDY = PARAMS['trading_days_per_year']
 st.set_page_config(page_title="Trading Monitor", page_icon="📈", layout="wide")
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 def _tbl(df: pd.DataFrame, show_index: bool = True, height: int | None = None) -> None:
     """Render a DataFrame as a Plotly Table — zero pyarrow dependency."""
     idx_vals  = [str(v) for v in df.index]
@@ -58,7 +60,8 @@ def _dn(df_or_series):
 if 'search_results' not in st.session_state:
     st.session_state['search_results'] = None
 
-# If the Search tab loaded a portfolio, pre-set the checkbox keys before render
+# If the Search tab loaded a portfolio, pre-set the checkbox keys before render.
+# This runs before the sidebar widgets are created so the checkboxes pick up the values.
 if st.session_state.get('_load_pending'):
     sel = st.session_state['_load_pending']
     for inst in ACTIVE_INSTRUMENTS:
@@ -85,6 +88,7 @@ with st.sidebar:
     c1.markdown("**Long ▲**")
     c2.markdown("**Short ▼**")
 
+    # Build flag dicts from checkbox state — these drive every calculation below
     long_flags: dict = {}
     short_flags: dict = {}
     for inst in ACTIVE_INSTRUMENTS:
@@ -100,11 +104,13 @@ if prices is None or prices.empty:
     st.error("No data loaded — check internet connection and try Refresh.")
     st.stop()
 
+# Pre-compute returns, vol, scaling, and portfolio return series once for all tabs
 rets     = returns(prices)
 vols     = rolling_volatility(rets)
 scalings = scaling_vectors(prices, rets)
 port_ret = portfolio_returns(rets, scalings, long_flags, short_flags)
 
+# Latest cross-section snapshots used throughout
 latest_prices   = prices.iloc[-1]
 latest_vols     = vols.iloc[-1]
 latest_scalings = scalings.iloc[-1]
@@ -121,7 +127,7 @@ with tab1:
     last_date = prices.index[-1].strftime('%d %b %Y')
     st.caption(f"Last data: {last_date}  |  {len(prices)} trading days loaded")
 
-    # Price / signal table
+    # ── Price / Signal Table ──────────────────────────────────────────────────
     price_tbl = pd.DataFrame({
         'Price':     latest_prices.map('{:,.1f}'.format),
         '1D Chg':    rets.iloc[-1].map('{:+.2%}'.format),
@@ -140,6 +146,7 @@ with tab1:
     _open_t       = [t for t in _all_trades if t['status'] == 'open']
     _closed_t     = [t for t in _all_trades if t['status'] == 'closed']
     _cur_px       = {k: float(v) for k, v in latest_prices.items() if pd.notna(v)}
+    # Realised P&L comes from closed trades; unrealised (MM) from open trades marked to market
     _realised     = sum(t.get('realised_pnl', 0.0) or 0.0 for t in _closed_t)
     _mm_pnl       = sum(trade_live_pnl(t, _cur_px) for t in _open_t)
     _total_equity = _acct['starting_capital'] + _realised + _mm_pnl
@@ -184,6 +191,7 @@ with tab1:
     st.markdown("---")
 
     # ── Signal Scanner ────────────────────────────────────────────────────────
+    # Shows key trend metrics for every instrument, sorted by distance from mean (most extreme first)
     st.subheader("Signal Scanner")
     _tol_sd      = PARAMS['xing_tolerance_sd']
     _n_fit       = PARAMS['linear_fit_points']
@@ -208,7 +216,7 @@ with tab1:
         _roll  = rolling_nd_returns(_s).iloc[-1]
         _beta  = float(_contractions.get(_inst, float('nan')))
 
-        # Pre-trade recommendation (item 1)
+        # Pre-trade recommendation: compute suggested stake and hypothetical P&L at current SDs
         _px   = float(latest_prices.get(_inst, float('nan')))
         _hv   = float(latest_vols.get(_inst, float('nan')))
         _sc2  = float(latest_scalings.get(_inst, 0.0))
@@ -218,6 +226,7 @@ with tab1:
             _rec_hpnl   = round(_rec_stake * _px * _hv * abs(_csd), 0)
         else:
             _rec_stake = _rec_margin = _rec_hpnl = 0.0
+        # Direction signal fires only when distance exceeds tolerance threshold
         _direction = 'BUY' if _csd < -_tol_sd else ('SELL' if _csd > _tol_sd else '')
 
         _scan_rows.append({
@@ -239,11 +248,13 @@ with tab1:
         })
     if _scan_rows:
         _scan_df = pd.DataFrame(_scan_rows)
+        # Sort by absolute SD distance so the most extreme instruments appear first
         _scan_df['_abs'] = _scan_df['Cur. SDs'].apply(lambda x: abs(float(x)) if x else 0.0)
         _scan_df = _scan_df.sort_values('_abs', ascending=False).drop(columns=['_abs'])
         _tbl(_scan_df, show_index=False)
 
-    # ── Multi-Timeframe Range Signals (item 4) ────────────────────────────────
+    # ── Multi-Timeframe Range Signals ─────────────────────────────────────────
+    # Shows where today's price sits within daily / weekly / monthly price ranges
     st.markdown("---")
     st.subheader("Multi-Timeframe Range Signals")
     st.caption("Percentile of current price within each rolling window. HIGH/LOW = top or bottom 10%.")
@@ -255,9 +266,11 @@ with tab1:
         if len(_px_ser) < 262:
             continue
         _cur_px2 = float(_px_ser.iloc[-1])
+        # Compute high/low for each timeframe window
         _d_hi = float(_px_ser.tail(262).max()); _d_lo = float(_px_ser.tail(262).min())
         _w_hi = float(_px_ser.tail(5).max());   _w_lo = float(_px_ser.tail(5).min())
         _m_hi = float(_px_ser.tail(21).max());  _m_lo = float(_px_ser.tail(21).min())
+        # Percentile position within each range (0 = at low, 1 = at high)
         _dp = (_cur_px2 - _d_lo) / (_d_hi - _d_lo) if _d_hi > _d_lo else 0.5
         _wp = (_cur_px2 - _w_lo) / (_w_hi - _w_lo) if _w_hi > _w_lo else 0.5
         _mp = (_cur_px2 - _m_lo) / (_m_hi - _m_lo) if _m_hi > _m_lo else 0.5
@@ -275,7 +288,7 @@ with tab1:
 
     st.markdown("---")
 
-    # Spread summary metrics
+    # ── Spread Performance ────────────────────────────────────────────────────
     st.subheader("Spread Performance")
     any_selected = any(long_flags.values()) or any(short_flags.values())
 
@@ -307,11 +320,13 @@ with tab1:
 with tab2:
     st.header("Analysis")
 
+    # ── Normalised Price Chart ────────────────────────────────────────────────
     display_list = [DISPLAY_NAMES.get(i, i) for i in ACTIVE_INSTRUMENTS]
     selected_display = st.multiselect("Instruments to plot", display_list, default=display_list[:4])
     selected = [k for k, v in DISPLAY_NAMES.items() if v in selected_display]
 
     if selected:
+        # Rebase all prices to 1.0 at the start of the history window for easy comparison
         norm = prices[selected] / prices[selected].iloc[0]
         norm = norm.rename(columns=DISPLAY_NAMES)
         st.plotly_chart(
@@ -326,6 +341,7 @@ with tab2:
             use_container_width=True,
         )
 
+    # ── Spread Trend Analysis ─────────────────────────────────────────────────
     st.subheader("Spread Trend Analysis")
 
     any_selected = any(long_flags.values()) or any(short_flags.values())
@@ -349,7 +365,7 @@ with tab2:
         fig_t.update_layout(title="Cumulative Spread with Linear Trend", height=350)
         st.plotly_chart(fig_t, use_container_width=True)
 
-        # Velocity & acceleration
+        # ── Velocity & Acceleration ───────────────────────────────────────────
         va = velocity_acceleration(port_ret)
         fig_va = make_subplots(rows=2, cols=1, shared_xaxes=True,
                                subplot_titles=('Velocity (ROC)', 'Acceleration'))
@@ -358,7 +374,7 @@ with tab2:
         fig_va.update_layout(height=380, title="Trend Velocity & Acceleration", showlegend=False)
         st.plotly_chart(fig_va, use_container_width=True)
 
-        # Crossing signals
+        # ── Crossing Signals Chart ────────────────────────────────────────────
         cross = crossing_signals(port_ret)
         tol   = PARAMS['xing_tolerance_sd']
         fig_x = go.Figure()
@@ -380,6 +396,7 @@ with tab2:
         )
 
         # ── Pair Statistics ───────────────────────────────────────────────────
+        # Distributional stats for 1/2/3/5-day rolling returns, including current z-score
         from scipy.stats import norm as _norm
         st.subheader("Pair Statistics")
 
@@ -406,6 +423,7 @@ with tab2:
         if _stat_rows:
             _tbl(pd.DataFrame(_stat_rows), show_index=False)
 
+        # Volatility scaled to daily / weekly / monthly holding periods
         st.markdown("**Volatility by timeframe**")
         _dv  = float(port_ret.std())
         _wv  = float(port_ret.rolling(5).sum().std())  if len(port_ret) >= 5  else float('nan')
@@ -415,6 +433,7 @@ with tab2:
         _vc2.metric("Weekly 1 SD",  f'{_wv:.2%}'  if pd.notna(_wv) else 'N/A')
         _vc3.metric("Monthly 1 SD", f'{_mv:.2%}' if pd.notna(_mv) else 'N/A')
 
+        # Empirical vs Gaussian tail probabilities for daily returns
         st.markdown("**Spread distribution (1-day)**")
         _ds = port_ret.dropna()
         if len(_ds) >= 10:
@@ -446,6 +465,8 @@ with tab3:
     st.header("Stake Calculator")
     st.caption("Prices are pre-filled from the latest data — edit if you want to run scenarios.")
 
+    # ── Price Inputs ──────────────────────────────────────────────────────────
+    # Allow the user to override prices for what-if scenarios
     price_cols = st.columns(4)
     price_inputs: dict = {}
     for i, inst in enumerate(ACTIVE_INSTRUMENTS):
@@ -480,6 +501,8 @@ with tab3:
     m2.metric("Short instruments", short_n)
     m3.metric("Total spread cost", f"£{total_cost:,.2f}")
 
+    # ── P&L Scenario ──────────────────────────────────────────────────────────
+    # Assumes longs move by +pct_move and shorts move by -pct_move (spread widens)
     st.subheader("P&L Scenario")
     pct_move = st.slider("Long leg % move (short leg moves opposite)", -5.0, 5.0, 1.0, 0.1)
     scenario = {
@@ -497,7 +520,7 @@ with tab3:
 with tab4:
     st.header("Portfolio")
 
-    # Correlation heatmap
+    # ── Correlation Heatmap ───────────────────────────────────────────────────
     st.subheader(f"Return Correlations — last {PARAMS['vol_calc_days']} days")
     corr = correlation_matrix(rets)
     fig_corr = px.imshow(
@@ -511,7 +534,7 @@ with tab4:
     fig_corr.update_layout(height=520)
     st.plotly_chart(fig_corr, use_container_width=True)
 
-    # Volatility & scaling bar chart
+    # ── Volatility & Scaling Bar Chart ────────────────────────────────────────
     st.subheader("Current Volatility & Scaling")
     vol_df = pd.DataFrame({
         'Daily Vol %': latest_vols * 100,
@@ -524,7 +547,7 @@ with tab4:
     fig_v.update_layout(barmode='group', height=350, title="Daily Volatility and Position Scaling by Instrument")
     st.plotly_chart(fig_v, use_container_width=True)
 
-    # Portfolio performance (if signals selected)
+    # ── Portfolio Performance ─────────────────────────────────────────────────
     st.subheader("Spread Portfolio Performance")
     any_selected = any(long_flags.values()) or any(short_flags.values())
     if any_selected and not port_ret.empty:
@@ -546,6 +569,7 @@ with tab4:
         st.info("Select instruments in the sidebar to see portfolio performance.")
 
     # ── P&L Attribution — Today ───────────────────────────────────────────────
+    # Breaks down today's P&L by instrument and region using net stakes from open trades
     st.subheader("P&L Attribution — Today")
 
     _REGIONS = {
@@ -556,6 +580,7 @@ with tab4:
     _today_ret = rets.iloc[-1]
     _open_t4   = [t for t in load_trades() if t['status'] == 'open']
 
+    # Build net stake per instrument across all open trades (long = positive, short = negative)
     _net_stakes: dict = {inst: 0.0 for inst in ACTIVE_INSTRUMENTS}
     for _t4 in _open_t4:
         for _leg in _t4.get('legs', []):
@@ -629,6 +654,7 @@ with tab5:
                 c2.caption(f"Long: {entry['long_display']}")
                 c2.caption(f"Short: {entry['short_display']}")
                 if c3.button("Load", key=f"sv_load_{idx}"):
+                    # Stage the flags so the sidebar checkboxes update on next render
                     st.session_state['_load_pending'] = {
                         'long':  entry['long_flags'],
                         'short': entry['short_flags'],
@@ -639,7 +665,7 @@ with tab5:
                     st.rerun()
                 st.divider()
 
-    # ── Parameters ──────────────────────────────────────────────────────────
+    # ── Search Parameters ─────────────────────────────────────────────────────
     pcol1, pcol2, pcol3 = st.columns(3)
 
     with pcol1:
@@ -663,7 +689,7 @@ with tab5:
         est_secs = max(1, int(n_combos / 80_000))
         st.caption(f"Est. run time: ~{est_secs}s")
 
-    # ── Metric filters (optional) ────────────────────────────────────────────
+    # ── Metric Filters ────────────────────────────────────────────────────────
     with st.expander("Metric filters  (leave unchecked to rank without filtering)"):
         st.caption(
             "ReturnSD = annualised Sharpe  |  TrendVolRatio = |trend slope| / vol  |  "
@@ -681,9 +707,10 @@ with tab5:
                     label_visibility='collapsed',
                 )
                 if use:
+                    # direction=1 means "include if metric >= limit", -1 means "<= limit"
                     active_filters[name] = (1 if higher_better else -1, limit)
 
-    # ── Run ──────────────────────────────────────────────────────────────────
+    # ── Run ───────────────────────────────────────────────────────────────────
     st.markdown("---")
     run_col, top_col = st.columns([2, 1])
     with run_col:
@@ -724,7 +751,7 @@ with tab5:
     if results is not None and not results.empty:
         st.subheader("Results (ranked by composite score)")
 
-        # Display table — hide internal flag columns
+        # Display table — hide internal flag columns used only for loading
         display_cols = ['Long', 'Short'] + METRIC_NAMES
         disp = results[display_cols].copy()
         for m in METRIC_NAMES:
@@ -732,7 +759,7 @@ with tab5:
 
         _tbl(disp, show_index=True)
 
-        # ── Load a result into the main analysis ─────────────────────────────
+        # ── Load result into main analysis ────────────────────────────────────
         st.markdown("---")
         st.subheader("Load result into Analysis")
 
@@ -752,6 +779,7 @@ with tab5:
             }
             st.rerun()
 
+        # ── Save Portfolio ────────────────────────────────────────────────────
         st.markdown("---")
         st.subheader("💾 Save Portfolio")
         default_name = f"{row['Long']} / {row['Short']}"
@@ -797,12 +825,12 @@ with tab6:
         if intraday is None or intraday.empty:
             st.error("Could not load intraday prices — markets may be closed or outside trading hours.")
         else:
-            # Strip timezone info for clean display
+            # Strip timezone so Plotly renders timestamps cleanly
             if hasattr(intraday.index, 'tz') and intraday.index.tz is not None:
                 intraday = intraday.copy()
                 intraday.index = intraday.index.tz_convert(None)
 
-            # Pivot = last close before today's session
+            # Pivot = last close before today's session (yesterday's close)
             today_date = pd.Timestamp.today().normalize()
             pivot = prices.iloc[-2] if prices.index[-1].normalize() >= today_date else prices.iloc[-1]
 
@@ -824,6 +852,7 @@ with tab6:
                           delta=f"±1 SD = {hist_vol:.2%}")
                 m3.metric("Last tick",        last_ts)
 
+                # ── Intraday Chart ────────────────────────────────────────────
                 spread_pct = spread * 100
                 sd_pct     = hist_vol * 100
 
@@ -859,7 +888,8 @@ with tab6:
                 st.plotly_chart(fig, use_container_width=True)
                 st.caption(f"Last data point: {spread.index[-1]}  |  Historical daily 1-SD: ±{hist_vol:.2%}  |  5D SD: ±{hist_vol_5d:.2%}")
 
-                # ── Intraday Volatility Tracker (item 6) ──────────────────────
+                # ── Intraday Volatility Tracker ───────────────────────────────
+                # Compares today's intrabar vol against historical daily vol for each selected instrument
                 st.subheader("Intraday Volatility by Instrument")
                 _sel_insts = [
                     i for i in ACTIVE_INSTRUMENTS
@@ -873,6 +903,7 @@ with tab6:
                             continue
                         _tv = float(_ir.std())
                         _hv2 = float(latest_vols.get(_inst, float('nan')))
+                        # Ratio > 1.5 flags unusually high intraday activity
                         _ratio = (_tv / _hv2) if (pd.notna(_hv2) and _hv2 > 0) else float('nan')
                         _ivol_rows.append({
                             'Instrument': DISPLAY_NAMES.get(_inst, _inst),
@@ -894,6 +925,7 @@ with tab7:
 
     _j_cur_px = {k: float(v) for k, v in latest_prices.items() if pd.notna(v)}
 
+    # Initialise session state for close confirmation flow and leg editor
     st.session_state.setdefault('pending_close_id', None)
     st.session_state.setdefault('j_legs', [
         {'buy_instrument':   ACTIVE_INSTRUMENTS[0], 'buy_entry_price': 0.0, 'buy_stake': 1.0,
@@ -912,6 +944,7 @@ with tab7:
             real_pnl  = trade.get('realised_pnl', 0.0) or 0.0
             total_pnl = live_pnl + real_pnl
 
+            # Trade header row: name, comments, and P&L metrics
             hcols = st.columns([4, 2, 2, 2, 1])
             hcols[0].markdown(f"**{trade['name']}**")
             if trade.get('comments'):
@@ -924,6 +957,7 @@ with tab7:
             hcols[2].metric("Realised",    f"£{real_pnl:+,.0f}")
             hcols[3].metric("Total P&L",   f"£{total_pnl:+,.0f}")
 
+            # Two-step confirmation for closing a trade (click once to stage, once to confirm)
             if trade['id'] == st.session_state['pending_close_id']:
                 st.warning(
                     f"Close **all legs** of **{trade['name']}** at current prices?  "
@@ -942,12 +976,14 @@ with tab7:
                     st.session_state['pending_close_id'] = trade['id']
                     st.rerun()
 
+            # ── Leg Detail Expander ───────────────────────────────────────────
             with st.expander(f"Legs — {len(trade['legs'])} pair(s)"):
                 from config import POINT_SIZES as _JPTS
                 for leg in trade['legs']:
                     bi, si   = leg['buy_instrument'], leg['sell_instrument']
                     b_cur    = _j_cur_px.get(bi, leg['buy_entry_price'])
                     s_cur    = _j_cur_px.get(si, leg['sell_entry_price'])
+                    # Live P&L for this individual leg
                     leg_live = (
                         (b_cur - leg['buy_entry_price'])  * leg['buy_stake']  * leg['pct_open'] * _JPTS.get(bi, 1.0)
                       - (s_cur - leg['sell_entry_price']) * leg['sell_stake'] * leg['pct_open'] * _JPTS.get(si, 1.0)
@@ -964,6 +1000,7 @@ with tab7:
                     lc[2].metric("Live P&L", f"£{leg_live:+,.0f}")
                     lc[3].metric("% Open", f"{leg['pct_open']*100:.0f}%")
 
+                    # Partial close sub-form (only shown if the leg still has open fraction)
                     if leg['pct_open'] > 1e-6:
                         with st.expander(f"Partial close — Leg {leg['leg_id']}"):
                             pc1, pc2, pc3, pc4 = st.columns(4)
@@ -992,6 +1029,7 @@ with tab7:
                                 )
                                 st.rerun()
 
+                    # Close history table for this leg
                     if leg['closes']:
                         _cr = pd.DataFrame(leg['closes'])
                         _cr['pnl']        = _cr['pnl'].map('£{:+,.0f}'.format)
@@ -1019,6 +1057,7 @@ with tab7:
 
     st.markdown("**Legs** — each row is one buy / sell pair")
 
+    # Legs are stored in session state so adding/removing rows survives reruns
     _legs_state    = st.session_state['j_legs']
     _legs_to_remove = []
 
@@ -1062,12 +1101,13 @@ with tab7:
             step=0.5, min_value=0.0, key=f'j_sell_stake_{_idx}'
         )
 
+        # Write updated values back to session state on every render
         _legs_state[_idx] = {
             'buy_instrument':   _buy_inst,  'buy_entry_price':  _buy_price,  'buy_stake':  _buy_stake,
             'sell_instrument':  _sell_inst, 'sell_entry_price': _sell_price, 'sell_stake': _sell_stake,
         }
 
-    # Remove / Add buttons below leg rows
+    # Remove / Add leg controls
     _al, _rl, _ol = st.columns([1, 1, 2])
     if _al.button("➕ Add leg", key='j_add_leg'):
         _legs_state.append({
@@ -1091,6 +1131,7 @@ with tab7:
                 entry_date=_entry_date_new.isoformat(),
                 comments=_trade_comments.strip(),
             )
+            # Reset the leg editor to a single blank leg after opening
             st.session_state['j_legs'] = [{
                 'buy_instrument':   ACTIVE_INSTRUMENTS[0], 'buy_entry_price': 0.0, 'buy_stake': 1.0,
                 'sell_instrument':  ACTIVE_INSTRUMENTS[1] if len(ACTIVE_INSTRUMENTS) > 1 else ACTIVE_INSTRUMENTS[0],
@@ -1111,6 +1152,7 @@ with tab7:
         st.metric("Total realised P&L", f"£{_total_pnl:+,.0f}",
                   delta=f"{_wins}/{len(closed_trades)} winning trades")
 
+        # Show most recent trades first
         _hist_rows = []
         for _t in reversed(closed_trades):
             _hist_rows.append({

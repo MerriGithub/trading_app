@@ -4,6 +4,7 @@ from scipy import stats
 
 from config import PARAMS, ACTIVE_INSTRUMENTS
 
+# Shorthand aliases for frequently-used params
 _TDY = PARAMS['trading_days_per_year']
 _VOL_WIN = PARAMS['vol_calc_days']
 _TARGET_VOL = PARAMS['target_daily_vol']
@@ -31,6 +32,7 @@ def scaling_vectors(prices: pd.DataFrame, rets: pd.DataFrame | None = None) -> p
     if rets is None:
         rets = returns(prices)
     vol = rolling_volatility(rets)
+    # Replace zero vol with NaN to avoid divide-by-zero, then clip so we never over-size
     scaling = (_TARGET_VOL / vol.replace(0, np.nan)).clip(upper=1.0).fillna(0.0)
     return scaling
 
@@ -56,7 +58,7 @@ def portfolio_returns(
             return pd.Series(0.0, index=rets.index)
         r = rets[active]
         s = scaling[active]
-        weighted = (r * s).mean(axis=1)   # equal weight, vol-scaled
+        weighted = (r * s).mean(axis=1)   # equal weight across selected instruments, vol-scaled
         return weighted
 
     return leg(long_flags) - leg(short_flags)
@@ -120,6 +122,7 @@ def crossing_signals(
     cum = (1 + spread_ret).cumprod()
     roll_mean = cum.rolling(window, min_periods=window // 2).mean()
     roll_std = cum.rolling(window, min_periods=window // 2).std()
+    # Normalise distance so it's comparable across different spread levels
     dist = (cum - roll_mean) / roll_std.replace(0, np.nan)
     return pd.DataFrame({
         'cumulative': cum,
@@ -145,6 +148,7 @@ def intraday_spread(
     Cumulative intraday spread return from pivot_prices (yesterday's close).
     Returns a Series indexed by timestamp.
     """
+    # Only use instruments that have a valid pivot price to calculate returns from
     instruments = [
         i for i in intraday_prices.columns
         if i in pivot_prices.index and pd.notna(pivot_prices[i]) and pivot_prices[i] != 0
@@ -154,8 +158,10 @@ def intraday_spread(
     if n_long == 0 or n_short == 0:
         return pd.Series(dtype=float)
 
+    # Return from yesterday's close to each intraday bar
     intra_rets = (intraday_prices[instruments] - pivot_prices[instruments]) / pivot_prices[instruments]
 
+    # Equal-weight each side, scaled by latest vol scaling
     long_w  = pd.Series({i: scalings_latest.get(i, 1.0) * long_flags.get(i, 0)  / n_long  for i in instruments})
     short_w = pd.Series({i: scalings_latest.get(i, 1.0) * short_flags.get(i, 0) / n_short for i in instruments})
 
@@ -172,7 +178,7 @@ def compute_contraction_betas(rets: pd.DataFrame, window: int = _VOL_WIN) -> pd.
     if not instruments:
         return pd.Series(dtype=float)
     recent = rets[instruments].tail(window)
-    mkt = recent.mean(axis=1)
+    mkt = recent.mean(axis=1)           # equal-weight proxy for the market
     mkt_var = float(mkt.var())
     if mkt_var == 0:
         return pd.Series(1.0, index=instruments)
@@ -180,6 +186,7 @@ def compute_contraction_betas(rets: pd.DataFrame, window: int = _VOL_WIN) -> pd.
 
 
 def portfolio_stats(port_ret: pd.Series) -> dict:
+    """Summary statistics for a daily return series, including annualised Sharpe."""
     if port_ret.empty or port_ret.isna().all():
         nan = float('nan')
         return {k: nan for k in ('total_return', 'max_return', 'min_return',

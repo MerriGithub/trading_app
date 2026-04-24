@@ -4,6 +4,8 @@ import pandas as pd
 from config import ACTIVE_INSTRUMENTS, SPREADS, POINT_SIZES, NTR
 
 
+# --- Position Sizing ---
+
 def compute_stakes(
     prices: dict,
     daily_vols: dict,
@@ -61,6 +63,8 @@ def compute_stakes(
 
     return pd.DataFrame(rows)
 
+
+# --- P&L Scenario ---
 
 def pnl_scenario(stakes_df: pd.DataFrame, price_changes_pct: dict) -> float:
     """

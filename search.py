@@ -17,13 +17,14 @@ from config import ACTIVE_INSTRUMENTS, DISPLAY_NAMES, PARAMS
 
 _TDY = PARAMS['trading_days_per_year']
 
-# Metric definitions: (label, higher_is_better, spreadsheet_default_limit)
+# --- Metric Definitions ---
+# Each tuple: (name, higher_is_better, spreadsheet_default_filter_limit)
 METRICS = [
-    ('ReturnSD',        False, -2.0),
-    ('TrendVolRatio',   True,   0.35),
-    ('ReturnTopology',  False, -3.0),
-    ('FitDataMinMaxSD', True,  12.0),
-    ('LastSD',          True,   3.0),
+    ('ReturnSD',        False, -2.0),   # annualised Sharpe — filter out very negative
+    ('TrendVolRatio',   True,   0.35),  # trend strength vs noise — higher = more trending
+    ('ReturnTopology',  False, -3.0),   # skewness of returns — filter out severe negative skew
+    ('FitDataMinMaxSD', True,  12.0),   # cumulative price range in SDs — higher = more movement
+    ('LastSD',          True,   3.0),   # current distance from rolling mean — higher = further from mean
 ]
 METRIC_NAMES = [m[0] for m in METRICS]
 
@@ -35,6 +36,7 @@ def _combo_matrix(n: int, k: int) -> tuple[np.ndarray, list[tuple]]:
     combos = list(combinations(range(n), k))
     mat = np.zeros((len(combos), n), dtype=np.float64)
     for i, idx in enumerate(combos):
+        # Each row sums to 1.0 (equal weight across k legs)
         mat[i, list(idx)] = 1.0 / k
     return mat, combos
 
@@ -46,15 +48,16 @@ def _batch_scores(spread_mat: np.ndarray) -> dict[str, np.ndarray]:
     """
     T, M = spread_mat.shape
 
-    # ReturnSD — annualised Sharpe
+    # ReturnSD — annualised Sharpe (mean / std * sqrt(trading_days))
     means = spread_mat.mean(axis=0)
     stds  = spread_mat.std(axis=0)
     return_sd = np.where(stds > 0, means / stds * np.sqrt(_TDY), 0.0)
 
-    # Cumulative return series
+    # Cumulative return series — used as the basis for several metrics below
     cum = np.cumprod(1.0 + spread_mat, axis=0)  # (T, M)
 
-    # TrendVolRatio — |OLS slope of cum| / daily vol
+    # TrendVolRatio — |OLS slope of cumulative spread| / daily vol
+    # High TVR means the spread is trending strongly relative to its noise
     x = np.arange(T, dtype=np.float64) - (T - 1) / 2.0
     xx = (x ** 2).sum()
     cum_mean = cum.mean(axis=0)
@@ -63,12 +66,14 @@ def _batch_scores(spread_mat: np.ndarray) -> dict[str, np.ndarray]:
     tvr = np.where(stds > 0, np.abs(slopes) / stds, 0.0)
 
     # ReturnTopology — skewness of daily returns
+    # Positive skew = more large upside moves; negative = fat left tail
     c  = spread_mat - means
     m2 = (c ** 2).mean(axis=0)
     m3 = (c ** 3).mean(axis=0)
     topology = np.where(m2 > 0, m3 / m2 ** 1.5, 0.0)
 
     # FitDataMinMaxSD — cumulative price range / trailing vol
+    # Measures how much the spread has moved relative to recent noise
     price_range = cum.max(axis=0) - cum.min(axis=0)
     n_tail = min(T, 20)
     tail_std = spread_mat[-n_tail:].std(axis=0)
@@ -76,7 +81,8 @@ def _batch_scores(spread_mat: np.ndarray) -> dict[str, np.ndarray]:
         tail_std > 0, price_range / (tail_std * np.sqrt(n_tail)), 0.0
     )
 
-    # LastSD — current level vs rolling mean, in SDs
+    # LastSD — current cumulative level vs rolling mean, expressed in SDs
+    # High absolute value means the spread is far from its historical centre
     win = min(T, _TDY)
     roll_mean = cum[-win:].mean(axis=0)
     roll_std  = cum[-win:].std(axis=0)
@@ -129,13 +135,13 @@ def run_search(
     instruments = [i for i in ACTIVE_INSTRUMENTS if i in rets.columns]
     N = len(instruments)
 
-    # Align and clip to window
+    # Align both series to the same window and pre-multiply returns by scaling
     r = rets[instruments].tail(window_days).dropna(how='any').to_numpy(dtype=np.float64)
     s = scalings[instruments].tail(window_days).dropna(how='any').to_numpy(dtype=np.float64)
     T = min(r.shape[0], s.shape[0])
-    scaled = r[-T:] * s[-T:]  # (T, N)
+    scaled = r[-T:] * s[-T:]  # (T, N) — vol-normalised returns
 
-    # Pre-compute vol-scaled leg returns for every combo size
+    # Pre-compute vol-scaled leg returns for every combo size to avoid redundant matrix ops
     leg_cache: dict[int, tuple[np.ndarray, list]] = {}
     for k in range(min_legs, max_legs + 1):
         mat, combos = _combo_matrix(N, k)
@@ -145,6 +151,7 @@ def run_search(
     records: list[dict] = []
     done = 0
 
+    # Outer loops: all long-side combo sizes × short-side combo sizes
     for n_long in range(min_legs, max_legs + 1):
         long_rets, long_combos = leg_cache[n_long]   # (T, M_long)
 
@@ -152,19 +159,21 @@ def run_search(
             short_rets, short_combos = leg_cache[n_short]  # (T, M_short)
 
             for l_i, long_combo in enumerate(long_combos):
-                lr = long_rets[:, l_i]                  # (T,)
+                lr = long_rets[:, l_i]                  # (T,) — single long basket
+                # Compute spread vs ALL short combos at once (vectorised batch)
                 spread_mat = lr[:, None] - short_rets   # (T, M_short)
                 batch = _batch_scores(spread_mat)
 
                 for s_i, short_combo in enumerate(short_combos):
                     done += 1
 
+                    # Skip if the same instruments appear on both sides
                     if set(long_combo) == set(short_combo):
                         continue
 
                     sc = {k: float(v[s_i]) for k, v in batch.items()}
 
-                    # Apply metric filters
+                    # Apply any active metric filters
                     if filters:
                         fail = False
                         for metric, (direction, limit) in filters.items():
@@ -194,9 +203,10 @@ def run_search(
         return pd.DataFrame()
 
     df = pd.DataFrame(records)
+    # Composite score: prioritises how far the spread is from its mean, trend strength, and price range
     df['_score'] = df['LastSD'].abs() + df['TrendVolRatio'] + df['FitDataMinMaxSD'] * 0.05
     df = (df.sort_values('_score', ascending=False)
             .head(top_n)
             .reset_index(drop=True))
-    df.index += 1  # 1-based rank
+    df.index += 1  # 1-based rank for display
     return df.drop(columns=['_score'])
