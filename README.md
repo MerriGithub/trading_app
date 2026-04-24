@@ -1,7 +1,6 @@
 # Trading Monitor
 
-A Streamlit dashboard for monitoring and trading index spread strategies across 12 global equity indices. Built around a volatility-targeting framework that mirrors a proprietary spreadsheet-based system.
-
+A Streamlit dashboard for monitoring and trading index spread strategies across 12 global equity indices. Built around a volatility-targeting framework.
 ---
 
 ## Overview
