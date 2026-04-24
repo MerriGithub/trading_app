@@ -13,7 +13,8 @@ from calculations import (
     returns, rolling_nd_returns, rolling_volatility, scaling_vectors,
     velocity_acceleration,
 )
-from config import ACTIVE_INSTRUMENTS, DISPLAY_NAMES, PARAMS, SPREADS
+from config import ACTIVE_INSTRUMENTS, DISPLAY_NAMES, PARAMS, POINT_SIZES, SPREADS
+from scipy.stats import norm as _norm
 from data import force_intraday_refresh, force_refresh, load_intraday_prices, load_prices
 from account import compute_daily_funding, compute_spread_costs, load_account, save_account
 from journal import (
@@ -198,7 +199,7 @@ with tab1:
     _tol_sd      = PARAMS['xing_tolerance_sd']
     _n_fit       = PARAMS['linear_fit_points']
     _contractions = compute_contraction_betas(rets)
-    _margin_rate  = 0.10
+    _margin_rate  = PARAMS['margin_rate']
     _scan_rows   = []
     for _inst in ACTIVE_INSTRUMENTS:
         if _inst not in rets.columns or _inst not in scalings.columns:
@@ -399,7 +400,6 @@ with tab2:
 
         # ── Pair Statistics ───────────────────────────────────────────────────
         # Distributional stats for 1/2/3/5-day rolling returns, including current z-score
-        from scipy.stats import norm as _norm
         st.subheader("Pair Statistics")
 
         _roll_s = rolling_nd_returns(port_ret)
@@ -602,8 +602,7 @@ with tab4:
             _stake   = _net_stakes.get(_inst, 0.0)
             _ret_d   = float(_today_ret[_inst]) if pd.notna(_today_ret.get(_inst)) else 0.0
             _price   = float(latest_prices.get(_inst, 0.0)) if pd.notna(latest_prices.get(_inst)) else 0.0
-            from config import POINT_SIZES as _PS2
-            _contrib = _stake * _price * _ret_d * _PS2.get(_inst, 1.0)
+            _contrib = _stake * _price * _ret_d * POINT_SIZES.get(_inst, 1.0)
             _attr_rows.append({
                 'Region':     _region,
                 'Instrument': DISPLAY_NAMES.get(_inst, _inst),
@@ -946,6 +945,13 @@ with tab7:
             real_pnl  = trade.get('realised_pnl', 0.0) or 0.0
             total_pnl = live_pnl + real_pnl
 
+            # Detect legs whose instruments are missing from the current price snapshot
+            _missing_px = {
+                leg[k] for leg in trade.get('legs', [])
+                for k in ('buy_instrument', 'sell_instrument')
+                if leg.get('pct_open', 0) > 1e-6 and leg[k] not in _j_cur_px
+            }
+
             # Trade header row: name, comments, and P&L metrics
             hcols = st.columns([4, 2, 2, 2, 1])
             hcols[0].markdown(f"**{trade['name']}**")
@@ -958,6 +964,8 @@ with tab7:
             hcols[1].metric("Unrealised",  f"£{live_pnl:+,.0f}")
             hcols[2].metric("Realised",    f"£{real_pnl:+,.0f}")
             hcols[3].metric("Total P&L",   f"£{total_pnl:+,.0f}")
+            if _missing_px:
+                st.caption(f"⚠️ No current price for {', '.join(_missing_px)} — unrealised P&L is understated.")
 
             # Two-step confirmation for closing a trade (click once to stage, once to confirm)
             if trade['id'] == st.session_state['pending_close_id']:
@@ -980,15 +988,14 @@ with tab7:
 
             # ── Leg Detail Expander ───────────────────────────────────────────
             with st.expander(f"Legs — {len(trade['legs'])} pair(s)"):
-                from config import POINT_SIZES as _JPTS
                 for leg in trade['legs']:
                     bi, si   = leg['buy_instrument'], leg['sell_instrument']
                     b_cur    = _j_cur_px.get(bi, leg['buy_entry_price'])
                     s_cur    = _j_cur_px.get(si, leg['sell_entry_price'])
                     # Live P&L for this individual leg
                     leg_live = (
-                        (b_cur - leg['buy_entry_price'])  * leg['buy_stake']  * leg['pct_open'] * _JPTS.get(bi, 1.0)
-                      - (s_cur - leg['sell_entry_price']) * leg['sell_stake'] * leg['pct_open'] * _JPTS.get(si, 1.0)
+                        (b_cur - leg['buy_entry_price'])  * leg['buy_stake']  * leg['pct_open'] * POINT_SIZES.get(bi, 1.0)
+                      - (s_cur - leg['sell_entry_price']) * leg['sell_stake'] * leg['pct_open'] * POINT_SIZES.get(si, 1.0)
                     )
                     lc = st.columns([3, 3, 2, 2])
                     lc[0].markdown(

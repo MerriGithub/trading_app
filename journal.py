@@ -20,6 +20,7 @@ def load_trades() -> list[dict]:
     # --- Legacy migration ---
     # Older records stored long_flags/short_flags instead of the current legs structure.
     # Patch them on load so the rest of the app always sees the legs format.
+    migrated = False
     for t in trades:
         if 'legs' not in t:
             lf = t.get('long_flags', {})
@@ -40,6 +41,10 @@ def load_trades() -> list[dict]:
             t['target_exposure'] = t.get('exposure', 0.0)
             t.setdefault('comments', '')
             t.setdefault('realised_pnl', 0.0)
+            migrated = True
+    # Persist migrated records so re-patching never happens again
+    if migrated:
+        _save(trades)
     return trades
 
 

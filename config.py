@@ -70,6 +70,7 @@ PARAMS = {
     'xing_tolerance_sd': 2.0,   # Crossing signal threshold in standard deviations
     'end_of_range_offset': 7,   # Days offset for range end
     'correl_smoothing': 3,      # Smoothing periods for correlation display
+    'margin_rate': 0.10,        # Broker margin rate used for hypothetical margin estimates
 }
 
 # --- Normal Trading Range ---

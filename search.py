@@ -198,7 +198,9 @@ def run_search(
                         **sc,
                     })
 
-                if progress_cb and (done % 5000 == 0 or done >= total):
+                # Fire every ~2% of total combinations so the bar is responsive on small searches
+                _tick = max(1, total // 50)
+                if progress_cb and (done % _tick == 0 or done >= total):
                     progress_cb(min(done / total, 1.0))
 
     if not records:
