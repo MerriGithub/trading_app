@@ -79,7 +79,7 @@ with st.sidebar:
         st.rerun()
 
     target_exposure = st.number_input("Target 1 SD Exposure (£)", value=500, step=50, min_value=50)
-    start_year = st.slider("History start year", 1999, 2020, 1999)
+    start_year = st.slider("History start year", 1999, date.today().year - 1, 1999)
 
     st.markdown("---")
     st.markdown("### Signal Selection")
