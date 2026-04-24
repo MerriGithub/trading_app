@@ -207,8 +207,13 @@ def run_search(
         return pd.DataFrame()
 
     df = pd.DataFrame(records)
-    # Composite score: prioritises how far the spread is from its mean, trend strength, and price range
-    df['_score'] = df['LastSD'].abs() + df['TrendVolRatio'] + df['FitDataMinMaxSD'] * 0.05
+    # Normalise each metric to z-scores before combining so different scales don't distort rankings
+    for _m in ('LastSD', 'TrendVolRatio', 'FitDataMinMaxSD'):
+        _std = df[_m].std()
+        _mean = df[_m].mean()
+        df[f'_z_{_m}'] = (df[_m] - _mean) / _std if _std > 0 else 0.0
+    df['_score'] = df['_z_LastSD'].abs() + df['_z_TrendVolRatio'] + df['_z_FitDataMinMaxSD']
+    df = df.drop(columns=[c for c in df.columns if c.startswith('_z_')])
     df = (df.sort_values('_score', ascending=False)
             .head(top_n)
             .reset_index(drop=True))

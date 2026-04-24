@@ -1067,8 +1067,8 @@ with tab7:
     st.markdown("**Legs** — each row is one buy / sell pair")
 
     # Legs are stored in session state so adding/removing rows survives reruns
-    _legs_state    = st.session_state['j_legs']
-    _legs_to_remove = []
+    _legs_state = st.session_state['j_legs']
+    _updated_legs = []
 
     for _idx, _leg in enumerate(_legs_state):
         _lc = st.columns([1, 2, 1, 1, 2, 1, 0.4])
@@ -1110,11 +1110,13 @@ with tab7:
             step=0.5, min_value=0.0, key=f'j_sell_stake_{_idx}'
         )
 
-        # Write updated values back to session state on every render
-        _legs_state[_idx] = {
+        _updated_legs.append({
             'buy_instrument':   _buy_inst,  'buy_entry_price':  _buy_price,  'buy_stake':  _buy_stake,
             'sell_instrument':  _sell_inst, 'sell_entry_price': _sell_price, 'sell_stake': _sell_stake,
-        }
+        })
+
+    # Single explicit write back to session state after all widgets have been read
+    st.session_state['j_legs'] = _updated_legs
 
     # Remove / Add leg controls
     _al, _rl, _ol = st.columns([1, 1, 2])

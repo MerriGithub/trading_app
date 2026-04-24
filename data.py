@@ -74,8 +74,10 @@ def _fetch(start_date: str) -> pd.DataFrame | None:
 
 def force_refresh() -> None:
     """Delete the local CSV cache and clear Streamlit's in-memory cache, forcing a full re-download."""
-    for f in CACHE_DIR.glob('prices.*'):
-        f.unlink()
+    for name in ('prices.csv', 'prices.tmp'):
+        f = CACHE_DIR / name
+        if f.exists():
+            f.unlink()
     st.cache_data.clear()
 
 
@@ -109,5 +111,3 @@ def force_intraday_refresh() -> None:
     load_intraday_prices.clear()
 
 
-def get_latest_prices(prices: pd.DataFrame) -> pd.Series:
-    return prices.iloc[-1]
