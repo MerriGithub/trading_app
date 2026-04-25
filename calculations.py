@@ -185,6 +185,47 @@ def compute_contraction_betas(rets: pd.DataFrame, window: int = _VOL_WIN) -> pd.
     return pd.Series({i: float(recent[i].cov(mkt)) / mkt_var for i in instruments})
 
 
+def crossing_signal_backtest(
+    spread_ret: pd.Series,
+    tolerance_sd: float | None = None,
+    exit_sd: float = 0.0,
+    window: int = _VOL_WIN,
+) -> pd.DataFrame:
+    """
+    Run the crossing signal backtest on a spread return series.
+
+    Returns a DataFrame with one row per trade.  Does not modify
+    crossing_signals() — this is an additive wrapper only.
+    """
+    from numba_core import backtest_spread, COL_ENTRY_IDX, COL_EXIT_IDX, \
+        COL_SIDE, COL_GROSS_RETURN, COL_HOLDING_DAYS
+
+    if tolerance_sd is None:
+        tolerance_sd = float(PARAMS['xing_tolerance_sd'])
+
+    arr      = spread_ret.dropna().values.astype(np.float64)
+    idx      = spread_ret.dropna().index
+    day_ints = ((idx - pd.Timestamp('1970-01-01')) // pd.Timedelta('1D')).values.astype(np.int64)
+
+    trades, n_trades, cum, dist_sd = backtest_spread(
+        arr, window, tolerance_sd, exit_sd, day_ints
+    )
+
+    if n_trades == 0:
+        return pd.DataFrame(columns=[
+            'entry_date', 'exit_date', 'side', 'gross_return', 'holding_days',
+        ])
+
+    t = trades[:n_trades]
+    return pd.DataFrame({
+        'entry_date':   [idx[int(t[i, COL_ENTRY_IDX])] for i in range(n_trades)],
+        'exit_date':    [idx[int(t[i, COL_EXIT_IDX])]  for i in range(n_trades)],
+        'side':         ['long' if t[i, COL_SIDE] == 1 else 'short' for i in range(n_trades)],
+        'gross_return': t[:, COL_GROSS_RETURN],
+        'holding_days': t[:, COL_HOLDING_DAYS].astype(int),
+    })
+
+
 def portfolio_stats(port_ret: pd.Series) -> dict:
     """Summary statistics for a daily return series, including annualised Sharpe."""
     if port_ret.empty or port_ret.isna().all():

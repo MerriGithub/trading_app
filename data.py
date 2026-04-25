@@ -111,3 +111,15 @@ def force_intraday_refresh() -> None:
     load_intraday_prices.clear()
 
 
+def load_external_prices(filepath: str, start_date: str = '1999-01-01') -> pd.DataFrame | None:
+    """Load an external price CSV (Date index, instrument columns).  Returns None if not found."""
+    p = Path(filepath)
+    if not p.exists():
+        return None
+    df = pd.read_csv(p, index_col=0, parse_dates=True)
+    df = df.ffill(limit=3)
+    if start_date:
+        df = df.loc[start_date:]
+    return df.dropna(how='all')
+
+

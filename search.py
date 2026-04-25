@@ -14,6 +14,10 @@ import numpy as np
 import pandas as pd
 
 from config import ACTIVE_INSTRUMENTS, DISPLAY_NAMES, PARAMS
+from numba_core import (
+    batch_backtest,
+    BR_N_TRADES, BR_GROSS_WR, BR_AVG_GROSS, BR_AVG_HOLDING, BR_PAYOFF_RATIO,
+)
 
 _TDY = PARAMS['trading_days_per_year']
 
@@ -99,21 +103,41 @@ def _batch_scores(spread_mat: np.ndarray) -> dict[str, np.ndarray]:
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def estimate_combinations(min_legs: int, max_legs: int, n: int = 12) -> int:
-    """Total (long, short) pairs for given leg range and instrument count."""
-    m = sum(comb(n, k) for k in range(min_legs, max_legs + 1))
-    return m * m
+def estimate_combinations(
+    min_long: int = 3,
+    max_long: int = 4,
+    min_short: int = 3,
+    max_short: int = 4,
+    n: int = 12,
+    min_legs: int | None = None,
+    max_legs: int | None = None,
+) -> int:
+    """Total (long, short) pairs for given leg ranges and instrument count."""
+    if min_legs is not None:
+        min_long = min_short = min_legs
+    if max_legs is not None:
+        max_long = max_short = max_legs
+    m_long  = sum(comb(n, k) for k in range(min_long,  max_long  + 1))
+    m_short = sum(comb(n, k) for k in range(min_short, max_short + 1))
+    return m_long * m_short
 
 
 def run_search(
     rets: pd.DataFrame,
     scalings: pd.DataFrame,
-    min_legs: int = 3,
-    max_legs: int = 4,
+    min_long_legs: int = 3,
+    max_long_legs: int = 4,
+    min_short_legs: int = 3,
+    max_short_legs: int = 4,
     window_days: int = _TDY,
     filters: dict | None = None,
     top_n: int = 30,
     progress_cb=None,
+    xing_sd: float | None = None,
+    exit_sd: float = 0.0,
+    # Backward compatibility
+    min_legs: int | None = None,
+    max_legs: int | None = None,
 ) -> pd.DataFrame:
     """
     Enumerate and score all (long, short) combinations.
@@ -129,45 +153,61 @@ def run_search(
     Returns
     -------
     DataFrame ranked by composite score, top_n rows.
-    Columns: Long, Short, ReturnSD, TrendVolRatio, ReturnTopology,
-             FitDataMinMaxSD, LastSD, plus hidden _long_flags / _short_flags.
+    Columns: Config, Long, Short, ReturnSD, TrendVolRatio, ReturnTopology,
+             FitDataMinMaxSD, LastSD, Trades, WinRate, Expectancy,
+             AvgHolding, PayoffRatio, plus hidden _long_flags / _short_flags.
     """
+    if min_legs is not None:
+        min_long_legs = min_short_legs = min_legs
+    if max_legs is not None:
+        max_long_legs = max_short_legs = max_legs
+
+    if xing_sd is None:
+        xing_sd = float(PARAMS['xing_tolerance_sd'])
+
     instruments = [i for i in ACTIVE_INSTRUMENTS if i in rets.columns]
     N = len(instruments)
 
     # Align both series to the same window and pre-multiply returns by scaling
-    r = rets[instruments].tail(window_days).dropna(how='any').to_numpy(dtype=np.float64)
+    window_df = rets[instruments].tail(window_days).dropna(how='any')
+    r = window_df.to_numpy(dtype=np.float64)
     s = scalings[instruments].tail(window_days).dropna(how='any').to_numpy(dtype=np.float64)
     T = min(r.shape[0], s.shape[0])
     scaled = r[-T:] * s[-T:]  # (T, N) — vol-normalised returns
 
-    # Pre-compute vol-scaled leg returns for every combo size to avoid redundant matrix ops
+    # Day integers for batch_backtest (pandas-version-agnostic day count)
+    day_ints = (
+        (window_df.index[-T:] - pd.Timestamp('1970-01-01')) // pd.Timedelta('1D')
+    ).values.astype(np.int64)
+
+    # Pre-compute vol-scaled leg returns for every combo size needed
+    all_k = set(range(min_long_legs, max_long_legs + 1)) | set(range(min_short_legs, max_short_legs + 1))
     leg_cache: dict[int, tuple[np.ndarray, list]] = {}
-    for k in range(min_legs, max_legs + 1):
+    for k in all_k:
         mat, combos = _combo_matrix(N, k)
         leg_cache[k] = (scaled @ mat.T, combos)  # (T, M_k), list of tuples
 
-    total = estimate_combinations(min_legs, max_legs, N)
+    total = estimate_combinations(min_long_legs, max_long_legs, min_short_legs, max_short_legs, N)
     records: list[dict] = []
     done = 0
 
     # Outer loops: all long-side combo sizes × short-side combo sizes
-    for n_long in range(min_legs, max_legs + 1):
+    for n_long in range(min_long_legs, max_long_legs + 1):
         long_rets, long_combos = leg_cache[n_long]   # (T, M_long)
 
-        for n_short in range(min_legs, max_legs + 1):
+        for n_short in range(min_short_legs, max_short_legs + 1):
             short_rets, short_combos = leg_cache[n_short]  # (T, M_short)
 
             for l_i, long_combo in enumerate(long_combos):
-                lr = long_rets[:, l_i]                  # (T,) — single long basket
+                lr = long_rets[:, l_i]                   # (T,) — single long basket
                 # Compute spread vs ALL short combos at once (vectorised batch)
-                spread_mat = lr[:, None] - short_rets   # (T, M_short)
+                spread_mat = lr[:, None] - short_rets    # (T, M_short)
                 batch = _batch_scores(spread_mat)
+                bt_results = batch_backtest(spread_mat, window_days, xing_sd, exit_sd, day_ints)
 
                 for s_i, short_combo in enumerate(short_combos):
                     done += 1
 
-                    # Skip if the same instruments appear on both sides
                     # Skip if any instrument appears on both sides — partial overlap
                     # causes those legs to cancel, inflating metrics for the remainder
                     if set(long_combo) & set(short_combo):
@@ -190,11 +230,18 @@ def run_search(
                     long_names  = [DISPLAY_NAMES.get(instruments[i], instruments[i]) for i in long_combo]
                     short_names = [DISPLAY_NAMES.get(instruments[i], instruments[i]) for i in short_combo]
 
+                    bt = bt_results[s_i]
                     records.append({
+                        'Config':       f'{n_long}v{n_short}',
                         'Long':         ' | '.join(long_names),
                         'Short':        ' | '.join(short_names),
                         '_long_flags':  {instruments[i]: 1 for i in long_combo},
                         '_short_flags': {instruments[i]: 1 for i in short_combo},
+                        'Trades':       int(bt[BR_N_TRADES]),
+                        'WinRate':      float(bt[BR_GROSS_WR]),
+                        'Expectancy':   float(bt[BR_AVG_GROSS]),
+                        'AvgHolding':   float(bt[BR_AVG_HOLDING]),
+                        'PayoffRatio':  float(bt[BR_PAYOFF_RATIO]),
                         **sc,
                     })
 
@@ -208,11 +255,12 @@ def run_search(
 
     df = pd.DataFrame(records)
     # Normalise each metric to z-scores before combining so different scales don't distort rankings
-    for _m in ('LastSD', 'TrendVolRatio', 'FitDataMinMaxSD'):
+    for _m in ('LastSD', 'TrendVolRatio', 'FitDataMinMaxSD', 'WinRate', 'Expectancy'):
         _std = df[_m].std()
         _mean = df[_m].mean()
         df[f'_z_{_m}'] = (df[_m] - _mean) / _std if _std > 0 else 0.0
-    df['_score'] = df['_z_LastSD'].abs() + df['_z_TrendVolRatio'] + df['_z_FitDataMinMaxSD']
+    df['_score'] = (df['_z_LastSD'].abs() + df['_z_TrendVolRatio'] +
+                    df['_z_FitDataMinMaxSD'] + df['_z_WinRate'] + df['_z_Expectancy'])
     df = df.drop(columns=[c for c in df.columns if c.startswith('_z_')])
     df = (df.sort_values('_score', ascending=False)
             .head(top_n)

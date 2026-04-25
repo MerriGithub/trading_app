@@ -6,9 +6,9 @@ This document describes the trading strategy implemented in this application. It
 
 ## 1. Background
 
-This strategy was originally developed approximately 20 years ago as a spreadsheet-based system for trading long/short spreads across global equity indices using CFDs (Contracts for Difference). The current application is a Python/Streamlit rebuild of that original framework, preserving the core logic while adding modern tooling for analysis, signal scanning, and trade management.
+This strategy was originally developed approximately 20 years ago as a spreadsheet-based system for trading long/short spreads across global equity indices using CFDs (Spreadbetting / Contract for Differences). The current application is a Python/Streamlit rebuild of that original framework, preserving the core logic while adding modern tooling for analysis, signal scanning, and trade management.
 
-The original system was developed empirically over years of live trading. It has not been formally back-tested with statistical rigour. A key open question is whether the historical performance reflects genuine edge or was a product of a specific market regime (2000s–2020s bull market with periodic crises).
+The original system was developed empirically over years of live trading. It has not been formally back-tested with statistical rigour since rebuilding. A key open question is whether the historical performance reflects genuine edge or was a product of a specific market regime (2000s–2020s bull market with periodic crises).
 
 ---
 
