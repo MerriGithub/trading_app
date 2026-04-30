@@ -30,6 +30,8 @@ from numba_core import (
     BR_N_TRADES, BR_GROSS_WR, BR_AVG_GROSS, BR_AVG_HOLDING,
     BR_AVG_WINNER, BR_AVG_LOSER, BR_PAYOFF_RATIO, BR_TOTAL_GROSS_PNL,
 )
+from search import _batch_scores
+from scoring import apply_scoring, estimate_trade_cost
 
 # Default parameters (matching config.py)
 DEFAULT_VOL_WINDOW = 262
@@ -300,6 +302,7 @@ def run_exhaustive_search(
     top_n: int = 30,
     sample_n: int = 0,
     seed: int = 42,
+    scoring_mode: str = 'composite',
     progress_cb=None,
     # Backward compatibility
     min_legs: int | None = None,
@@ -399,10 +402,9 @@ def run_exhaustive_search(
                 lr = long_rets[:, li]
                 spread_mat = lr[:, None] - short_rets  # (T, M_short)
 
-                # Run batch backtest on the full spread matrix
-                batch_results = batch_backtest(
-                    spread_mat, vol_window, xing_sd, exit_sd, day_ints
-                )
+                # Batch backtest and spread-shape metrics (same vectorised pass)
+                batch_results  = batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints)
+                shape_scores   = _batch_scores(spread_mat)
 
                 # Extract results for valid (non-overlapping) combos only
                 for si, short_combo in enumerate(short_combos):
@@ -417,17 +419,20 @@ def run_exhaustive_search(
                     if n_trades == 0:
                         continue
 
-                    # Apply costs to batch results
-                    avg_holding = br[BR_AVG_HOLDING]
+                    avg_holding = float(br[BR_AVG_HOLDING])
+                    # User-rate net (shown in results, reflects their actual broker cost)
                     total_spread_cost = spread_cost_pct * n_legs_total * 2
                     avg_fin_cost = financing_daily_pct * n_legs_total * avg_holding
-                    avg_net = br[BR_AVG_GROSS] - total_spread_cost - avg_fin_cost
+                    avg_net = float(br[BR_AVG_GROSS]) - total_spread_cost - avg_fin_cost
+                    # Account-rate cost (used for cost_rank scoring mode)
+                    est_cost = estimate_trade_cost(avg_holding, nl, ns, spread_cost_pct)
 
                     long_names = [display_names.get(instruments[i], instruments[i])
                                   for i in long_combo]
                     short_names = [display_names.get(instruments[i], instruments[i])
                                    for i in short_combo]
 
+                    sc = {k: float(v[si]) for k, v in shape_scores.items()}
                     records.append({
                         'Long': ' | '.join(long_names),
                         'Short': ' | '.join(short_names),
@@ -435,17 +440,18 @@ def run_exhaustive_search(
                         '_long_flags': {instruments[i]: 1 for i in long_combo},
                         '_short_flags': {instruments[i]: 1 for i in short_combo},
                         # Backtest metrics
-                        'Trades': n_trades,
-                        'WinRate': br[BR_GROSS_WR],
-                        'NetWR': max(0, br[BR_GROSS_WR] - (avg_fin_cost + total_spread_cost)),
-                        'Expectancy': br[BR_AVG_GROSS],
+                        'Trades':        n_trades,
+                        'WinRate':       float(br[BR_GROSS_WR]),
+                        'Expectancy':    float(br[BR_AVG_GROSS]),
                         'NetExpectancy': avg_net,
-                        'AvgHolding': avg_holding,
-                        'PayoffRatio': br[BR_PAYOFF_RATIO],
-                        'AvgWinner': br[BR_AVG_WINNER],
-                        'AvgLoser': br[BR_AVG_LOSER],
-                        'SpreadCost': total_spread_cost,
-                        'FinCost': avg_fin_cost,
+                        'EstCost':       est_cost,
+                        'AvgHolding':    avg_holding,
+                        'PayoffRatio':   float(br[BR_PAYOFF_RATIO]),
+                        'AvgWinner':     float(br[BR_AVG_WINNER]),
+                        'AvgLoser':      float(br[BR_AVG_LOSER]),
+                        'SpreadCost':    total_spread_cost,
+                        'FinCost':       avg_fin_cost,
+                        **sc,  # ReturnSD, TrendVolRatio, ReturnTopology, FitDataMinMaxSD, LastSD
                     })
 
                 if progress_cb and done % max(1, total // 50) == 0:
@@ -458,16 +464,7 @@ def run_exhaustive_search(
         return pd.DataFrame()
 
     df = pd.DataFrame(records)
-
-    # Composite ranking score (z-score normalised)
-    score_cols = ['WinRate', 'Expectancy', 'PayoffRatio']
-    for col in score_cols:
-        std = df[col].std()
-        mean = df[col].mean()
-        df[f'_z_{col}'] = (df[col] - mean) / std if std > 0 else 0.0
-
-    df['_score'] = sum(df[f'_z_{col}'] for col in score_cols)
-    df = df.drop(columns=[c for c in df.columns if c.startswith('_z_')])
+    df = apply_scoring(df, scoring_mode)
     df = (df.sort_values('_score', ascending=False)
             .head(top_n)
             .reset_index(drop=True))

@@ -23,6 +23,7 @@ from journal import (
 )
 from saved import delete_portfolio, load_saved, save_portfolio
 from search import METRIC_NAMES, METRICS, estimate_combinations, run_search
+from scoring import SCORING_MODES
 from stake_calc import compute_stakes, pnl_scenario
 from asset_configs import ASSET_CLASSES, ASSET_CLASS_OPTIONS
 from backtest import (
@@ -126,9 +127,9 @@ latest_scalings = scalings.iloc[-1]
 all_trades = load_trades()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📊 Dashboard", "📈 Analysis", "🧮 Stake Calculator", "🗂 Portfolio",
-    "🔍 Search", "⏱ Live", "📓 Journal", "🔬 Backtest",
+    "🔍 Search", "⏱ Live", "📓 Journal", "🔬 Backtest", "🔄 Walk-Forward",
 ])
 
 
@@ -732,6 +733,25 @@ with tab5:
                     # direction=1 means "include if metric >= limit", -1 means "<= limit"
                     active_filters[name] = (1 if higher_better else -1, limit)
 
+    # ── Scoring mode ──────────────────────────────────────────────────────────
+    s_score_col, _ = st.columns([2, 2])
+    with s_score_col:
+        scoring_mode = st.selectbox(
+            "Ranking method",
+            list(SCORING_MODES.keys()),
+            format_func=lambda x: SCORING_MODES[x],
+            key='s_scoring_mode',
+        )
+    with st.expander("Scoring methodology (Q11 research)"):
+        st.info(
+            "**Q11 walk-forward finding:** The original composite score has no significant "
+            "predictive power for out-of-sample performance (Spearman ρ = −0.037, p = 0.15). "
+            "FitDataMinMaxSD was removed — it is a *negative* predictor (ρ = −0.129, p < 0.001). "
+            "**Cost-Based** ranking is recommended: all pairs have similar gross returns (~83% GWR), "
+            "so selecting the cheapest to hold maximises net expectancy. "
+            "Use the Walk-Forward tab to validate any scoring approach before trading."
+        )
+
     # ── Run ───────────────────────────────────────────────────────────────────
     st.markdown("---")
     run_col, top_col = st.columns([2, 1])
@@ -762,6 +782,7 @@ with tab5:
                 filters=active_filters or None,
                 top_n=int(top_n),
                 progress_cb=_progress,
+                scoring_mode=scoring_mode,
             )
 
         progress_bar.progress(1.0)
@@ -776,19 +797,25 @@ with tab5:
         st.subheader("Results (ranked by composite score)")
 
         # Display table — hide internal flag columns used only for loading
-        _bt_cols = ['Trades', 'WinRate', 'Expectancy', 'AvgHolding', 'PayoffRatio']
-        display_cols = [c for c in ['Config', 'Long', 'Short'] + METRIC_NAMES + _bt_cols
-                        if c in results.columns]
+        _ordered_cols = [
+            'Config', 'Long', 'Short',
+            'WinRate', 'Expectancy', 'NetExpectancy', 'EstCost', 'AvgHolding',
+            'Trades', 'PayoffRatio',
+            'ReturnSD', 'TrendVolRatio', 'ReturnTopology', 'FitDataMinMaxSD', 'LastSD',
+        ]
+        display_cols = [c for c in _ordered_cols if c in results.columns]
         disp = results[display_cols].copy()
-        for m in METRIC_NAMES:
-            disp[m] = disp[m].map('{:.2f}'.format)
-        for m in [c for c in _bt_cols if c in disp.columns]:
-            if m == 'Trades':
-                disp[m] = disp[m].map('{:.0f}'.format)
-            elif m == 'WinRate':
-                disp[m] = disp[m].map('{:.1%}'.format)
+        _pct_cols = {'WinRate'}
+        _int_cols = {'Trades'}
+        for c in disp.columns:
+            if c in ('Config', 'Long', 'Short'):
+                continue
+            elif c in _pct_cols:
+                disp[c] = disp[c].map('{:.1%}'.format)
+            elif c in _int_cols:
+                disp[c] = disp[c].map('{:.0f}'.format)
             else:
-                disp[m] = disp[m].map('{:.2f}'.format)
+                disp[c] = disp[c].map('{:.3f}'.format)
 
         _tbl(disp, show_index=True)
 
@@ -1313,6 +1340,16 @@ with tab8:
     # Pre-populate basket from Search tab "Backtest this" button
     _bt_pending = st.session_state.pop('bt_pending', None)
 
+    # ── Scoring mode ──────────────────────────────────────────────────────────
+    bt_score_col, _ = st.columns([2, 2])
+    with bt_score_col:
+        bt_scoring_mode = st.selectbox(
+            "Ranking method",
+            list(SCORING_MODES.keys()),
+            format_func=lambda x: SCORING_MODES[x],
+            key='bt_scoring_mode',
+        )
+
     # ── Run ───────────────────────────────────────────────────────────────────
     st.markdown("---")
     bt_run = st.button("▶  Run Backtest", type="primary", use_container_width=True, key='bt_run')
@@ -1370,6 +1407,7 @@ with tab8:
                 financing_daily_pct=_fin_daily,
                 top_n=int(bt_top_n),
                 sample_n=int(bt_sample),
+                scoring_mode=bt_scoring_mode,
                 progress_cb=_bt_progress,
             )
 
@@ -1407,19 +1445,22 @@ with tab8:
             _m5.metric("Payoff Ratio",    f"{float(_top.get('PayoffRatio', 0)):.2f}")
 
             # Results table
-            st.subheader("Results (ranked by composite score)")
-            _bt_display_cols = [c for c in [
-                'Config', 'Long', 'Short', 'Trades', 'WinRate',
-                'Expectancy', 'NetExpectancy', 'AvgHolding', 'PayoffRatio',
-            ] if c in _bt_df.columns]
+            st.subheader(f"Results (ranked by: {SCORING_MODES.get(bt_scoring_mode, bt_scoring_mode)})")
+            _bt_ordered = [
+                'Config', 'Long', 'Short',
+                'WinRate', 'Expectancy', 'NetExpectancy', 'EstCost', 'AvgHolding',
+                'Trades', 'PayoffRatio',
+                'ReturnSD', 'TrendVolRatio', 'ReturnTopology', 'FitDataMinMaxSD', 'LastSD',
+            ]
+            _bt_display_cols = [c for c in _bt_ordered if c in _bt_df.columns]
             _bt_disp = _bt_df[_bt_display_cols].copy()
             for _c in _bt_disp.columns:
                 if _c in ('Long', 'Short', 'Config'):
                     continue
-                elif _c == 'Trades':
-                    _bt_disp[_c] = _bt_disp[_c].map('{:.0f}'.format)
                 elif _c == 'WinRate':
                     _bt_disp[_c] = _bt_disp[_c].map('{:.1%}'.format)
+                elif _c == 'Trades':
+                    _bt_disp[_c] = _bt_disp[_c].map('{:.0f}'.format)
                 else:
                     _bt_disp[_c] = _bt_disp[_c].map('{:.3f}'.format)
             _tbl(_bt_disp, show_index=True)
@@ -1578,3 +1619,230 @@ with tab8:
                     f"Exported to `backtest_exports/summary_{_ts}.json` "
                     f"and `results_{_ts}.csv`"
                 )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 9 — Walk-Forward Validation
+# ════════════════════════════════════════════════════════════════════════════
+with tab9:
+    from walkforward import run_walk_forward, summarise_walk_forward
+
+    st.header("Walk-Forward Validation")
+    st.caption(
+        "Tests whether the selected scoring mode predicts out-of-sample performance. "
+        "Reproduces the Q11 research protocol: score all 1v1 pairs on IS data, "
+        "evaluate on OOS data, compute Spearman ρ(IS rank, OOS gross return)."
+    )
+
+    # ── Parameters ────────────────────────────────────────────────────────────
+    wf_col1, wf_col2, wf_col3 = st.columns(3)
+    with wf_col1:
+        st.markdown("**Window lengths (trading years)**")
+        wf_is_years  = st.number_input("IS window (years)",  3, 10, 5, key='wf_is')
+        wf_oos_years = st.number_input("OOS window (years)", 1,  5, 2, key='wf_oos')
+        wf_step      = st.number_input("Step size (years)",  1,  3, 1, key='wf_step')
+
+    with wf_col2:
+        st.markdown("**Signal parameters**")
+        wf_xing_sd = st.number_input("Entry SD",  0.5, 5.0, 2.0, 0.5, key='wf_xing')
+        wf_exit_sd = st.number_input("Exit SD",   0.0, 2.0, 0.0, 0.5, key='wf_exit')
+        wf_vol_win = st.number_input("Vol window", 100, 500, 262, key='wf_vol')
+
+    with wf_col3:
+        st.markdown("**Scoring & data**")
+        wf_scoring = st.selectbox(
+            "Scoring mode",
+            list(SCORING_MODES.keys()),
+            format_func=lambda x: SCORING_MODES[x],
+            key='wf_scoring',
+        )
+        wf_asset = st.selectbox(
+            "Asset class",
+            [k for k, _ in ASSET_CLASS_OPTIONS],
+            format_func=lambda k: dict(ASSET_CLASS_OPTIONS)[k],
+            key='wf_asset',
+        )
+
+    # Estimate window count for UI feedback
+    from pathlib import Path as _WfPath
+    _wf_cache = _WfPath(__file__).parent / 'cache'
+    _wf_cfg   = ASSET_CLASSES[wf_asset]
+    _wf_csv   = _wf_cache / _wf_cfg['csv_file']
+
+    # ── Run ───────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    wf_run = st.button("▶  Run Walk-Forward", type="primary", use_container_width=True, key='wf_run')
+
+    if wf_run:
+        if not _wf_csv.exists():
+            st.error(f"No data file found at `{_wf_csv}`. Run the Backtest tab first to cache this asset class.")
+            st.stop()
+
+        with st.spinner("Loading prices…"):
+            try:
+                _wf_prices, _wf_instruments = load_asset_prices(_wf_csv)
+            except Exception as _e:
+                st.error(f"Failed to load prices: {_e}")
+                st.stop()
+
+        _n_windows_est = max(0, (len(_wf_prices) - wf_is_years * 262 - wf_oos_years * 262) // (wf_step * 262))
+        _n_pairs_est   = len(_wf_instruments) * (len(_wf_instruments) - 1)
+        st.caption(f"~{_n_windows_est} windows × {_n_pairs_est} pairs = ~{_n_windows_est * _n_pairs_est:,} observations")
+
+        _wf_prog = st.progress(0.0)
+        _wf_stat = st.empty()
+
+        def _wf_progress(pct: float):
+            _wf_prog.progress(pct)
+            _wf_stat.caption(f"Walk-forward: {pct*100:.0f}% complete…")
+
+        with st.spinner("Running walk-forward…"):
+            _wf_results = run_walk_forward(
+                _wf_prices, _wf_instruments,
+                is_years=int(wf_is_years),
+                oos_years=int(wf_oos_years),
+                step_years=int(wf_step),
+                scoring_mode=wf_scoring,
+                vol_window=int(wf_vol_win),
+                xing_sd=float(wf_xing_sd),
+                exit_sd=float(wf_exit_sd),
+                progress_cb=_wf_progress,
+            )
+
+        _wf_prog.progress(1.0)
+        _wf_stat.empty()
+        st.session_state['wf_results_cache'] = {
+            'results':      _wf_results,
+            'scoring_mode': wf_scoring,
+            'asset':        wf_asset,
+        }
+
+    # ── Results display ───────────────────────────────────────────────────────
+    _wf_cache_data = st.session_state.get('wf_results_cache')
+
+    if _wf_cache_data is not None:
+        _wf_df   = _wf_cache_data['results']
+        _wf_mode = _wf_cache_data['scoring_mode']
+
+        if _wf_df.empty:
+            st.warning("No results — insufficient data for the selected window lengths.")
+        else:
+            _wf_sum = summarise_walk_forward(_wf_df)
+            rho     = _wf_sum['rho']
+            pval    = _wf_sum['p_value']
+            n_obs   = _wf_sum['n_obs']
+
+            # ── Summary metrics ───────────────────────────────────────────────
+            st.subheader("Summary")
+            sm1, sm2, sm3 = st.columns(3)
+            sm1.metric("Spearman ρ (IS rank vs OOS gross)",
+                       f"{rho:+.3f}",
+                       help="Positive means IS rank predicts OOS outperformers. "
+                            "Near zero means IS scoring has no predictive power.")
+            sm2.metric("p-value", f"{pval:.4f}",
+                       delta="significant" if pval < 0.05 else "not significant",
+                       delta_color="normal" if pval < 0.05 else "off")
+            sm3.metric("Observations", f"{n_obs:,}")
+
+            sm4, sm5, sm6 = st.columns(3)
+            sm4.metric("Q1 − Q5 OOS Gross",
+                       f"{_wf_sum['q1_mean'] - _wf_sum['q5_mean']:+.4f}",
+                       help="Positive means IS top quintile outperforms IS bottom quintile OOS.")
+            sm5.metric("Q1 vs Q5 t-statistic",
+                       f"{_wf_sum['t_stat']:+.3f}",
+                       help="Welch t-test: IS best quintile vs IS worst quintile OOS gross return.")
+            sm6.metric("Q1 vs Q5 p-value",
+                       f"{_wf_sum['t_p']:.4f}",
+                       delta="significant" if _wf_sum['t_p'] < 0.05 else "not significant",
+                       delta_color="normal" if _wf_sum['t_p'] < 0.05 else "off")
+
+            # ── Interpretation ────────────────────────────────────────────────
+            if abs(rho) < 0.1 and pval >= 0.05:
+                st.warning(
+                    f"**No predictive power** — the '{SCORING_MODES.get(_wf_mode, _wf_mode)}' scoring mode "
+                    f"has no significant relationship with OOS performance "
+                    f"(ρ = {rho:+.3f}, p = {pval:.4f}). "
+                    "Consider Cost-Based ranking as a structural alternative."
+                )
+            elif rho > 0.1 and pval < 0.05:
+                st.success(
+                    f"**Positive predictive power** — IS rank positively correlates with OOS gross return "
+                    f"(ρ = {rho:+.3f}, p = {pval:.4f}). "
+                    "This scoring mode identifies better pairs out-of-sample."
+                )
+            elif rho < -0.1 and pval < 0.05:
+                st.error(
+                    f"**Negative predictor** — IS rank is negatively correlated with OOS gross return "
+                    f"(ρ = {rho:+.3f}, p = {pval:.4f}). "
+                    "IS top-ranked pairs underperform OOS. Consider the Contrarian mode."
+                )
+            else:
+                st.info(f"ρ = {rho:+.3f}, p = {pval:.4f} — weak or marginal result.")
+
+            st.markdown("---")
+
+            # ── Quintile table ────────────────────────────────────────────────
+            st.subheader("OOS Performance by IS Quintile")
+            st.caption("Q1 = IS top-ranked; Q5 = IS bottom-ranked. A flat table means scoring has no predictive power.")
+            if not _wf_sum['quintile_df'].empty:
+                _q_disp = _wf_sum['quintile_df'].copy()
+                for _c in ['OOS_GrossWR']:
+                    _q_disp[_c] = _q_disp[_c].map('{:.1%}'.format)
+                for _c in ['OOS_Gross', 'OOS_Net']:
+                    _q_disp[_c] = _q_disp[_c].map('{:.4f}'.format)
+                for _c in ['OOS_AvgHold']:
+                    _q_disp[_c] = _q_disp[_c].map('{:.0f}d'.format)
+                _tbl(_q_disp, show_index=True)
+
+            # ── Bar chart: OOS Gross by quintile ─────────────────────────────
+            if not _wf_sum['quintile_df'].empty:
+                _q_plot = _wf_sum['quintile_df'].reset_index()
+                _fig_q = px.bar(
+                    _q_plot, x='Q', y='OOS_Gross',
+                    title="OOS Gross Return by IS Quintile (flat = no predictive power)",
+                    labels={'Q': 'IS Quintile', 'OOS_Gross': 'Mean OOS Gross Return'},
+                    color_discrete_sequence=['#2c6fad'],
+                )
+                _fig_q.add_hline(
+                    y=float(_wf_sum['quintile_df']['OOS_Gross'].mean()),
+                    line_dash='dash', line_color='orange',
+                    annotation_text='Mean',
+                )
+                _fig_q.update_layout(showlegend=False)
+                st.plotly_chart(_fig_q, use_container_width=True)
+
+            st.markdown("---")
+
+            # ── Scatter plot: IS rank vs OOS gross ────────────────────────────
+            st.subheader("IS Rank vs OOS Gross Return")
+            st.caption("No pattern = no predictive power. Each point is one pair in one walk-forward window.")
+            _valid = _wf_sum.get('valid', pd.DataFrame())
+            if not _valid.empty:
+                _fig_sc = px.scatter(
+                    _valid, x='IS_Rank', y='OOS_Gross',
+                    color='window',
+                    opacity=0.5,
+                    trendline='ols',
+                    title=f"IS Rank vs OOS Gross Return (ρ = {rho:+.3f}, p = {pval:.4f})",
+                    labels={'IS_Rank': 'IS Rank (1 = best)', 'OOS_Gross': 'OOS Gross Return'},
+                )
+                _fig_sc.add_hline(y=0, line_dash='dash', line_color='red', opacity=0.5)
+                _fig_sc.update_layout(coloraxis_showscale=False)
+                st.plotly_chart(_fig_sc, use_container_width=True)
+
+            # ── Per-window ρ table ────────────────────────────────────────────
+            if not _wf_sum['window_df'].empty:
+                with st.expander("Per-window Spearman ρ"):
+                    _tbl(_wf_sum['window_df'], show_index=False)
+
+            # ── Raw data download ─────────────────────────────────────────────
+            st.markdown("---")
+            if st.button("💾 Export walk-forward results", key='wf_export'):
+                _wf_export = _wf_df[[c for c in _wf_df.columns if not c.startswith('_')]].copy()
+                import json as _wfjson
+                from datetime import datetime as _wfdt
+                _wf_ts  = _wfdt.now().strftime('%Y%m%d_%H%M%S')
+                _wf_dir = _WfPath(__file__).parent / 'backtest_exports'
+                _wf_dir.mkdir(exist_ok=True)
+                _wf_export.to_csv(_wf_dir / f'walkforward_{_wf_ts}.csv', index=False)
+                st.success(f"Exported to `backtest_exports/walkforward_{_wf_ts}.csv`")

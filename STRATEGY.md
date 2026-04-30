@@ -133,10 +133,17 @@ The search engine enumerates all possible long/short basket combinations for a g
 | **FitDataMinMaxSD** | Cumulative price range / trailing vol | Higher better |
 | **LastSD** | Current distance from rolling mean in SDs | Higher absolute value better |
 
-The composite score is: `z(LastSD).abs() + z(TrendVolRatio) + z(FitDataMinMaxSD)`  
+The composite score (post-Q11) is: `z(|LastSD|) + z(TrendVolRatio) + z(WinRate) + z(Expectancy)`  
 (each metric z-score normalised before combining to avoid scale bias)
 
-**Known limitation**: Searching ~500K combinations over the same historical window used for scoring introduces **look-ahead / data-mining bias**. The metrics that rank highly are those that happen to have worked in the historical sample. Out-of-sample performance has not been formally tested.
+FitDataMinMaxSD was **removed** from the composite formula after Q11 walk-forward analysis showed it is a significant negative predictor of out-of-sample return (ρ = −0.129, p < 0.001). It is still computed and displayed for information.
+
+Three ranking modes are available (selectable in the Search and Backtest tabs):
+- **Composite** (default): z(|LastSD|) + z(TrendVolRatio) + z(WinRate) + z(Expectancy). Improved but not validated as having positive OOS predictive power.
+- **Cost-Based**: Ranks by lowest estimated trading cost. Since all pairs have similar gross returns (~83% GWR, ~2.6% per trade), selecting the cheapest pairs to hold maximises net expectancy.
+- **Contrarian**: Inverts the composite score. Exploits the weak negative IS→OOS rank correlation found in Q11.
+
+**Known limitation**: Scoring ~500K combinations over the same historical window introduces look-ahead / data-mining bias. Use the Walk-Forward tab to validate any scoring approach before trading.
 
 ---
 
@@ -193,6 +200,18 @@ There is no maximum drawdown rule, no stop-loss, and no position reduction mecha
 
 ### 8.7 Dividends and Index Adjustments
 The strategy uses price-only index data (no total return). For long holding periods, dividend effects accumulate. The framework does not account for this.
+
+### 8.8 Search Engine Scoring (Q11 Findings)
+A 14-window walk-forward analysis across 1,516 pair-window observations (Q11) found:
+
+- Composite score vs OOS gross return: Spearman ρ = **−0.037**, p = 0.15 (no predictive power)
+- FitDataMinMaxSD vs OOS gross return: ρ = **−0.129**, p < 0.001 (negative predictor — removes worse pairs)
+- IS win rate vs OOS win rate: ρ = −0.024 (does not persist)
+- IS expectancy vs OOS gross: ρ = +0.010 (does not persist)
+- All quintiles have similar OOS gross returns (~2.6%/trade); costs dominate net returns
+- The gross-to-net gap (~3.1 ppt) is 13× larger than the Q1-vs-Q5 selection gap (~0.24 ppt)
+
+The crossing signal itself is robust (~83% gross win rate across all quintiles out-of-sample). The weakness is exclusively in the pair selection layer. See `Q11_InSample_Scoring_Research_Paper.docx` for full analysis.
 
 ---
 

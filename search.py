@@ -18,6 +18,7 @@ from numba_core import (
     batch_backtest,
     BR_N_TRADES, BR_GROSS_WR, BR_AVG_GROSS, BR_AVG_HOLDING, BR_PAYOFF_RATIO,
 )
+from scoring import apply_scoring, estimate_trade_cost
 
 _TDY = PARAMS['trading_days_per_year']
 
@@ -135,6 +136,7 @@ def run_search(
     progress_cb=None,
     xing_sd: float | None = None,
     exit_sd: float = 0.0,
+    scoring_mode: str = 'composite',
     # Backward compatibility
     min_legs: int | None = None,
     max_legs: int | None = None,
@@ -231,17 +233,21 @@ def run_search(
                     short_names = [DISPLAY_NAMES.get(instruments[i], instruments[i]) for i in short_combo]
 
                     bt = bt_results[s_i]
+                    avg_hold = float(bt[BR_AVG_HOLDING])
+                    est_cost = estimate_trade_cost(avg_hold, n_long, n_short)
                     records.append({
-                        'Config':       f'{n_long}v{n_short}',
-                        'Long':         ' | '.join(long_names),
-                        'Short':        ' | '.join(short_names),
-                        '_long_flags':  {instruments[i]: 1 for i in long_combo},
-                        '_short_flags': {instruments[i]: 1 for i in short_combo},
-                        'Trades':       int(bt[BR_N_TRADES]),
-                        'WinRate':      float(bt[BR_GROSS_WR]),
-                        'Expectancy':   float(bt[BR_AVG_GROSS]),
-                        'AvgHolding':   float(bt[BR_AVG_HOLDING]),
-                        'PayoffRatio':  float(bt[BR_PAYOFF_RATIO]),
+                        'Config':         f'{n_long}v{n_short}',
+                        'Long':           ' | '.join(long_names),
+                        'Short':          ' | '.join(short_names),
+                        '_long_flags':    {instruments[i]: 1 for i in long_combo},
+                        '_short_flags':   {instruments[i]: 1 for i in short_combo},
+                        'Trades':         int(bt[BR_N_TRADES]),
+                        'WinRate':        float(bt[BR_GROSS_WR]),
+                        'Expectancy':     float(bt[BR_AVG_GROSS]),
+                        'NetExpectancy':  float(bt[BR_AVG_GROSS]) - est_cost,
+                        'EstCost':        est_cost,
+                        'AvgHolding':     avg_hold,
+                        'PayoffRatio':    float(bt[BR_PAYOFF_RATIO]),
                         **sc,
                     })
 
@@ -254,14 +260,7 @@ def run_search(
         return pd.DataFrame()
 
     df = pd.DataFrame(records)
-    # Normalise each metric to z-scores before combining so different scales don't distort rankings
-    for _m in ('LastSD', 'TrendVolRatio', 'FitDataMinMaxSD', 'WinRate', 'Expectancy'):
-        _std = df[_m].std()
-        _mean = df[_m].mean()
-        df[f'_z_{_m}'] = (df[_m] - _mean) / _std if _std > 0 else 0.0
-    df['_score'] = (df['_z_LastSD'].abs() + df['_z_TrendVolRatio'] +
-                    df['_z_FitDataMinMaxSD'] + df['_z_WinRate'] + df['_z_Expectancy'])
-    df = df.drop(columns=[c for c in df.columns if c.startswith('_z_')])
+    df = apply_scoring(df, scoring_mode)
     df = (df.sort_values('_score', ascending=False)
             .head(top_n)
             .reset_index(drop=True))
