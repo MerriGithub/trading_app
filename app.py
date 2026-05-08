@@ -794,7 +794,7 @@ with tab5:
     results = st.session_state.get('search_results')
 
     if results is not None and not results.empty:
-        st.subheader("Results (ranked by composite score)")
+        st.subheader(f"Results (ranked by: {SCORING_MODES.get(scoring_mode, scoring_mode)})")
 
         # Display table — hide internal flag columns used only for loading
         _ordered_cols = [
@@ -807,6 +807,7 @@ with tab5:
         disp = results[display_cols].copy()
         _pct_cols = {'WinRate'}
         _int_cols = {'Trades'}
+        _day_cols = {'AvgHolding'}
         for c in disp.columns:
             if c in ('Config', 'Long', 'Short'):
                 continue
@@ -814,6 +815,8 @@ with tab5:
                 disp[c] = disp[c].map('{:.1%}'.format)
             elif c in _int_cols:
                 disp[c] = disp[c].map('{:.0f}'.format)
+            elif c in _day_cols:
+                disp[c] = disp[c].map(lambda v: f'{v:.0f}d')
             else:
                 disp[c] = disp[c].map('{:.3f}'.format)
 
@@ -1461,6 +1464,8 @@ with tab8:
                     _bt_disp[_c] = _bt_disp[_c].map('{:.1%}'.format)
                 elif _c == 'Trades':
                     _bt_disp[_c] = _bt_disp[_c].map('{:.0f}'.format)
+                elif _c == 'AvgHolding':
+                    _bt_disp[_c] = _bt_disp[_c].map(lambda v: f'{v:.0f}d')
                 else:
                     _bt_disp[_c] = _bt_disp[_c].map('{:.3f}'.format)
             _tbl(_bt_disp, show_index=True)
