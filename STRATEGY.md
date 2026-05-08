@@ -1,4 +1,4 @@
-# Merrittocracy — Global Spread Trading Platform
+# Spread Trading Platform
 ## Project Reference & Development Guide
 
 *Last updated: 2026-05-08*
@@ -160,11 +160,11 @@ This is the single most valuable change identified across Q1–Q8. Currently the
 - Increase the universe of net-positive pairs from ~21 to ~109+ for cross-asset
 
 **What needs to happen:**
-1. `config.py` / UI sidebar — add `exit_sd` parameter (default 0.0, range 0.0–2.0)
-2. `numba_core.py` — the `exit_sd` parameter already exists in `backtest_spread()` and `detect_trades()` — verify it works correctly at non-zero values
-3. `search.py` — pass `exit_sd` through to the batch backtest
-4. `backtest.py` — same
-5. `app.py` tabs 5, 8, 9 — add exit_sd slider/input
+1.-- `config.py` / UI sidebar — add `exit_sd` parameter (default 0.0, range 0.0–2.0)--
+2.--`numba_core.py` — the `exit_sd` parameter already exists in `backtest_spread()` and `detect_trades()` — verify it works correctly at non-zero values--
+3.-- `search.py` — pass `exit_sd` through to the batch backtest--
+4.-- `backtest.py` — same--
+5.-- `app.py` tabs 5, 8, 9 — add exit_sd slider/input--
 6. **Re-run Q1 equity, Q5 FX, Q7 FI backtests at exit_sd = 0.5 and 1.0** to quantify the aggregate impact. Q8 already has this data for cross-asset pairs.
 
 **Verification:** Run backtest tab with equity indices at exit_sd=1.0. Average holding should drop from ~135 to ~60–80 days. Net expectancy should improve materially (may become positive for some pairs).

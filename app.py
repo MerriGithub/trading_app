@@ -733,14 +733,19 @@ with tab5:
                     # direction=1 means "include if metric >= limit", -1 means "<= limit"
                     active_filters[name] = (1 if higher_better else -1, limit)
 
-    # ── Scoring mode ──────────────────────────────────────────────────────────
-    s_score_col, _ = st.columns([2, 2])
+    # ── Scoring mode + Exit SD ────────────────────────────────────────────────
+    s_score_col, s_exit_col, _ = st.columns([2, 1, 1])
     with s_score_col:
         scoring_mode = st.selectbox(
             "Ranking method",
             list(SCORING_MODES.keys()),
             format_func=lambda x: SCORING_MODES[x],
             key='s_scoring_mode',
+        )
+    with s_exit_col:
+        s_exit_sd = st.number_input(
+            "Exit SD", 0.0, 2.0, 0.0, 0.5, key='s_exit_sd',
+            help="0.0 = full reversion. 1.0 = partial exit (shorter holds, less financing drag).",
         )
     with st.expander("Scoring methodology (Q11 research)"):
         st.info(
@@ -783,6 +788,7 @@ with tab5:
                 top_n=int(top_n),
                 progress_cb=_progress,
                 scoring_mode=scoring_mode,
+                exit_sd=float(s_exit_sd),
             )
 
         progress_bar.progress(1.0)
