@@ -1286,350 +1286,600 @@ with tab8:
     from pathlib import Path as _Path
     _CACHE_DIR = _Path(__file__).parent / 'cache'
 
-    # ── Data source ───────────────────────────────────────────────────────────
-    bt_col1, bt_col2 = st.columns([2, 1])
-    with bt_col1:
-        asset_key = st.selectbox(
-            "Data source",
-            [k for k, _ in ASSET_CLASS_OPTIONS],
-            format_func=lambda k: dict(ASSET_CLASS_OPTIONS)[k],
-            key='bt_asset',
-        )
-    with bt_col2:
-        uploaded = st.file_uploader("Or upload custom CSV", type=['csv'], key='bt_upload')
+    # ── Search mode ───────────────────────────────────────────────────────────
+    bt_mode = st.radio(
+        "Search mode",
+        ["Intra-asset", "Cross-asset"],
+        horizontal=True,
+        key='bt_mode',
+        help=(
+            "Intra-asset: both long and short baskets from the same asset class. "
+            "Cross-asset: long from one class, short from another. "
+            "Q8 found the best individual pairs are cross-asset."
+        ),
+    )
 
-    cfg = ASSET_CLASSES[asset_key]
-    csv_path = _CACHE_DIR / cfg['csv_file']
-
-    # ── Signal parameters ─────────────────────────────────────────────────────
-    with st.expander("Signal Parameters", expanded=True):
-        bc1, bc2, bc3, bc4 = st.columns(4)
-        bt_vol_window = bc1.number_input("Vol window", 50, 500, 262, key='bt_vol')
-        bt_xing_sd    = bc2.number_input("Entry SD", 0.5, 5.0, 2.0, 0.5, key='bt_xing')
-        bt_exit_sd    = bc3.number_input(
-            "Exit SD", 0.0, 2.0, 0.0, 0.5, key='bt_exit',
-            help="0.0 = full reversion. 0.5 = partial (shorter holds, less financing).",
-        )
-        bt_fin_rate   = bc4.number_input(
-            "Financing %pa", 0.0, 10.0,
-            cfg['financing']['long_rate'] * 100, 0.1, key='bt_fin',
-        )
-
-    # ── Basket configuration ──────────────────────────────────────────────────
-    st.markdown("**Basket configuration**")
-    bk1, bk2, bk3, bk4 = st.columns(4)
-
-    with bk1:
-        st.markdown("**Long legs**")
-        bt_min_long = st.number_input("Min", 2, 6, 3, key='bt_min_long')
-        bt_max_long = st.number_input("Max", 2, 6, 3, key='bt_max_long')
-
-    with bk2:
-        st.markdown("**Short legs**")
-        bt_symmetric = st.checkbox("Same as long", value=True, key='bt_symmetric')
-        if bt_symmetric:
-            bt_min_short, bt_max_short = int(bt_min_long), int(bt_max_long)
-        else:
-            bt_min_short = st.number_input("Min", 2, 6, 3, key='bt_min_short')
-            bt_max_short = st.number_input("Max", 2, 6, 3, key='bt_max_short')
-
-    with bk3:
-        bt_sample = st.number_input(
-            "Sample size (0 = exhaustive)", 0, 50000, 2000, key='bt_sample',
-            help="Randomly sample this many combinations. 0 runs all combinations.",
-        )
-        bt_top_n = st.number_input("Show top N", 5, 100, 30, key='bt_top_n')
-
-    with bk4:
-        st.markdown("**History window**")
-        bt_window_opts = {'1 year': 262, '2 years': 524, '3 years': 786, '5 years': 1310, 'All': 0}
-        bt_window_label = st.selectbox("Window", list(bt_window_opts.keys()), index=2, key='bt_window')
-        bt_window_days = bt_window_opts[bt_window_label] or None
-
-    # Pre-populate basket from Search tab "Backtest this" button
-    _bt_pending = st.session_state.pop('bt_pending', None)
-
-    # ── Scoring mode ──────────────────────────────────────────────────────────
-    bt_score_col, _ = st.columns([2, 2])
-    with bt_score_col:
-        bt_scoring_mode = st.selectbox(
-            "Ranking method",
-            list(SCORING_MODES.keys()),
-            format_func=lambda x: SCORING_MODES[x],
-            key='bt_scoring_mode',
-        )
-
-    # ── Run ───────────────────────────────────────────────────────────────────
-    st.markdown("---")
-    bt_run = st.button("▶  Run Backtest", type="primary", use_container_width=True, key='bt_run')
-
-    if bt_run:
-        if not csv_path.exists() and uploaded is None:
-            st.error(
-                f"No data file found at `{csv_path}`. "
-                "Upload a CSV above or add the file to the cache directory."
+    if bt_mode == 'Intra-asset':
+        # ── Data source ───────────────────────────────────────────────────────
+        bt_col1, bt_col2 = st.columns([2, 1])
+        with bt_col1:
+            asset_key = st.selectbox(
+                "Data source",
+                [k for k, _ in ASSET_CLASS_OPTIONS],
+                format_func=lambda k: dict(ASSET_CLASS_OPTIONS)[k],
+                key='bt_asset',
             )
-            st.stop()
+        with bt_col2:
+            uploaded = st.file_uploader("Or upload custom CSV", type=['csv'], key='bt_upload')
 
-        with st.spinner("Loading prices…"):
-            try:
-                if uploaded is not None:
-                    import io
-                    _raw = pd.read_csv(io.BytesIO(uploaded.read()), index_col='Date', parse_dates=True)
-                    _raw = _raw.ffill(limit=3).dropna(how='all')
-                    _instruments_bt = list(_raw.columns)
-                    _prices_bt = _raw
-                else:
-                    _prices_bt, _instruments_bt = load_asset_prices(csv_path)
-            except Exception as e:
-                st.error(f"Failed to load prices: {e}")
+        cfg = ASSET_CLASSES[asset_key]
+        csv_path = _CACHE_DIR / cfg['csv_file']
+
+        # ── Signal parameters ─────────────────────────────────────────────────
+        with st.expander("Signal Parameters", expanded=True):
+            bc1, bc2, bc3, bc4 = st.columns(4)
+            bt_vol_window = bc1.number_input("Vol window", 50, 500, 262, key='bt_vol')
+            bt_xing_sd    = bc2.number_input("Entry SD", 0.5, 5.0, 2.0, 0.5, key='bt_xing')
+            bt_exit_sd    = bc3.number_input(
+                "Exit SD", 0.0, 2.0, 0.0, 0.5, key='bt_exit',
+                help="0.0 = full reversion. 0.5 = partial (shorter holds, less financing).",
+            )
+            bt_fin_rate   = bc4.number_input(
+                "Financing %pa", 0.0, 10.0,
+                cfg['financing']['long_rate'] * 100, 0.1, key='bt_fin',
+            )
+
+        # ── Basket configuration ──────────────────────────────────────────────
+        st.markdown("**Basket configuration**")
+        bk1, bk2, bk3, bk4 = st.columns(4)
+
+        with bk1:
+            st.markdown("**Long legs**")
+            bt_min_long = st.number_input("Min", 2, 6, 3, key='bt_min_long')
+            bt_max_long = st.number_input("Max", 2, 6, 3, key='bt_max_long')
+
+        with bk2:
+            st.markdown("**Short legs**")
+            bt_symmetric = st.checkbox("Same as long", value=True, key='bt_symmetric')
+            if bt_symmetric:
+                bt_min_short, bt_max_short = int(bt_min_long), int(bt_max_long)
+            else:
+                bt_min_short = st.number_input("Min", 2, 6, 3, key='bt_min_short')
+                bt_max_short = st.number_input("Max", 2, 6, 3, key='bt_max_short')
+
+        with bk3:
+            bt_sample = st.number_input(
+                "Sample size (0 = exhaustive)", 0, 50000, 2000, key='bt_sample',
+                help="Randomly sample this many combinations. 0 runs all combinations.",
+            )
+            bt_top_n = st.number_input("Show top N", 5, 100, 30, key='bt_top_n')
+
+        with bk4:
+            st.markdown("**History window**")
+            bt_window_opts = {'1 year': 262, '2 years': 524, '3 years': 786, '5 years': 1310, 'All': 0}
+            bt_window_label = st.selectbox("Window", list(bt_window_opts.keys()), index=2, key='bt_window')
+            bt_window_days = bt_window_opts[bt_window_label] or None
+
+        # Pre-populate basket from Search tab "Backtest this" button
+        _bt_pending = st.session_state.pop('bt_pending', None)
+
+        # ── Scoring mode ──────────────────────────────────────────────────────
+        bt_score_col, _ = st.columns([2, 2])
+        with bt_score_col:
+            bt_scoring_mode = st.selectbox(
+                "Ranking method",
+                list(SCORING_MODES.keys()),
+                format_func=lambda x: SCORING_MODES[x],
+                key='bt_scoring_mode',
+            )
+
+        # ── Run ───────────────────────────────────────────────────────────────
+        st.markdown("---")
+        bt_run = st.button("▶  Run Backtest", type="primary", use_container_width=True, key='bt_run')
+
+        if bt_run:
+            if not csv_path.exists() and uploaded is None:
+                st.error(
+                    f"No data file found at `{csv_path}`. "
+                    "Upload a CSV above or add the file to the cache directory."
+                )
                 st.stop()
 
-        with st.spinner("Preparing returns…"):
-            _scaled_bt, _day_ints_bt, _index_bt = prepare_returns(
-                _prices_bt, _instruments_bt,
-                vol_window=int(bt_vol_window),
-                window_days=bt_window_days,
-            )
-
-        with st.spinner("Running exhaustive search…"):
-            _bt_progress_bar = st.progress(0.0)
-            _bt_status = st.empty()
-
-            def _bt_progress(pct: float):
-                _bt_progress_bar.progress(pct)
-                _bt_status.caption(f"Backtested {pct*100:.0f}% of combinations…")
-
-            _display_names_bt = cfg.get('instruments', {})
-            _fin_daily = bt_fin_rate / 100 / 365
-
-            _bt_results = run_exhaustive_search(
-                _scaled_bt, _day_ints_bt, _instruments_bt,
-                display_names=_display_names_bt,
-                min_long_legs=int(bt_min_long),
-                max_long_legs=int(bt_max_long),
-                min_short_legs=int(bt_min_short),
-                max_short_legs=int(bt_max_short),
-                vol_window=int(bt_vol_window),
-                xing_sd=float(bt_xing_sd),
-                exit_sd=float(bt_exit_sd),
-                financing_daily_pct=_fin_daily,
-                top_n=int(bt_top_n),
-                sample_n=int(bt_sample),
-                scoring_mode=bt_scoring_mode,
-                progress_cb=_bt_progress,
-            )
-
-        _bt_progress_bar.progress(1.0)
-        _bt_status.empty()
-        st.session_state['bt_results_cache'] = {
-            'df': _bt_results,
-            'asset_key': asset_key,
-            'params': {
-                'vol_window': int(bt_vol_window),
-                'xing_sd': float(bt_xing_sd),
-                'exit_sd': float(bt_exit_sd),
-                'fin_rate': float(bt_fin_rate),
-            },
-        }
-
-    # ── Results display ───────────────────────────────────────────────────────
-    _bt_cache = st.session_state.get('bt_results_cache')
-
-    if _bt_cache is not None:
-        _bt_df = _bt_cache['df']
-
-        if _bt_df.empty:
-            st.warning("No combinations produced trades with the current parameters.")
-        else:
-            st.success(f"Found **{len(_bt_df)}** results.")
-
-            # Summary metrics from top result
-            _top = _bt_df.iloc[0]
-            _m1, _m2, _m3, _m4, _m5 = st.columns(5)
-            _m1.metric("Top Trades",      f"{int(_top.get('Trades', 0)):,}")
-            _m2.metric("Win Rate",        f"{float(_top.get('WinRate', 0)):.1%}")
-            _m3.metric("Expectancy",      f"{float(_top.get('Expectancy', 0)):.3f}")
-            _m4.metric("Avg Holding",     f"{float(_top.get('AvgHolding', 0)):.0f}d")
-            _m5.metric("Payoff Ratio",    f"{float(_top.get('PayoffRatio', 0)):.2f}")
-
-            # Results table
-            st.subheader(f"Results (ranked by: {SCORING_MODES.get(bt_scoring_mode, bt_scoring_mode)})")
-            _bt_ordered = [
-                'Config', 'Long', 'Short',
-                'WinRate', 'Expectancy', 'NetExpectancy', 'EstCost', 'AvgHolding',
-                'Trades', 'PayoffRatio',
-                'ReturnSD', 'TrendVolRatio', 'ReturnTopology', 'FitDataMinMaxSD', 'LastSD',
-            ]
-            _bt_display_cols = [c for c in _bt_ordered if c in _bt_df.columns]
-            _bt_disp = _bt_df[_bt_display_cols].copy()
-            for _c in _bt_disp.columns:
-                if _c in ('Long', 'Short', 'Config'):
-                    continue
-                elif _c == 'WinRate':
-                    _bt_disp[_c] = _bt_disp[_c].map('{:.1%}'.format)
-                elif _c == 'Trades':
-                    _bt_disp[_c] = _bt_disp[_c].map('{:.0f}'.format)
-                elif _c == 'AvgHolding':
-                    _bt_disp[_c] = _bt_disp[_c].map(lambda v: f'{v:.0f}d')
-                else:
-                    _bt_disp[_c] = _bt_disp[_c].map('{:.3f}'.format)
-            _tbl(_bt_disp, show_index=True)
-
-            # ── Charts ────────────────────────────────────────────────────────
-            st.markdown("---")
-            st.subheader("Top Result — Trade Analysis")
-
-            # Re-run single backtest on top result to get trade-level data
-            _top_long  = list(_top.get('_long_flags', {}).keys()) if '_long_flags' in _bt_df.columns else []
-            _top_short = list(_top.get('_short_flags', {}).keys()) if '_short_flags' in _bt_df.columns else []
-
-            if '_long_flags' in _bt_df.columns and not _bt_df.iloc[0]['_long_flags'] == {}:
+            with st.spinner("Loading prices…"):
                 try:
-                    _top_long_instr  = list(_bt_df.iloc[0]['_long_flags'].keys())
-                    _top_short_instr = list(_bt_df.iloc[0]['_short_flags'].keys())
-                    _all_instr = list(dict.fromkeys(_top_long_instr + _top_short_instr))
+                    if uploaded is not None:
+                        import io
+                        _raw = pd.read_csv(io.BytesIO(uploaded.read()), index_col='Date', parse_dates=True)
+                        _raw = _raw.ffill(limit=3).dropna(how='all')
+                        _instruments_bt = list(_raw.columns)
+                        _prices_bt = _raw
+                    else:
+                        _prices_bt, _instruments_bt = load_asset_prices(csv_path)
+                except Exception as e:
+                    st.error(f"Failed to load prices: {e}")
+                    st.stop()
 
-                    # Re-run single backtest to get full trade array
-                    if hasattr(_scaled_bt, '__len__') and 'bt_results_cache' in st.session_state:
-                        pass  # scaled available from last run in this session
+            with st.spinner("Preparing returns…"):
+                _scaled_bt, _day_ints_bt, _index_bt = prepare_returns(
+                    _prices_bt, _instruments_bt,
+                    vol_window=int(bt_vol_window),
+                    window_days=bt_window_days,
+                )
 
-                    with st.spinner("Computing trade details…"):
-                        _reload_prices, _reload_instr = load_asset_prices(csv_path) if csv_path.exists() else (_prices_bt, _instruments_bt)
-                        _reload_scaled, _reload_day_ints, _reload_index = prepare_returns(
-                            _reload_prices, _reload_instr,
-                            vol_window=int(bt_vol_window),
-                            window_days=bt_window_days,
-                        )
-                        _long_mask  = np.array([1 if i in _top_long_instr  else 0 for i in _reload_instr], dtype=np.float64)
-                        _short_mask = np.array([1 if i in _top_short_instr else 0 for i in _reload_instr], dtype=np.float64)
-                        _n_long  = max(1, _long_mask.sum())
-                        _n_short = max(1, _short_mask.sum())
-                        _spread_ret = (
-                            (_reload_scaled @ (_long_mask / _n_long)) -
-                            (_reload_scaled @ (_short_mask / _n_short))
-                        )
-                        _single_bt = run_backtest(
-                            _spread_ret, _reload_day_ints,
-                            vol_window=int(bt_vol_window),
-                            xing_sd=float(bt_xing_sd),
-                            exit_sd=float(bt_exit_sd),
-                            financing_daily_pct=_fin_daily,
-                            n_legs=int(_n_long + _n_short),
-                        )
+            with st.spinner("Running exhaustive search…"):
+                _bt_progress_bar = st.progress(0.0)
+                _bt_status = st.empty()
 
-                    _n_bt = _single_bt['n_trades']
-                    if _n_bt > 0:
-                        _trades_arr = _single_bt['trades_raw'][:_n_bt]
-                        from numba_core import COL_GROSS_RETURN, COL_HOLDING_DAYS, COL_SIDE
+                def _bt_progress(pct: float):
+                    _bt_progress_bar.progress(pct)
+                    _bt_status.caption(f"Backtested {pct*100:.0f}% of combinations…")
 
-                        _gross_rets  = _trades_arr[:, COL_GROSS_RETURN]
-                        _hold_days   = _trades_arr[:, COL_HOLDING_DAYS]
+                _display_names_bt = cfg.get('instruments', {})
+                _fin_daily = bt_fin_rate / 100 / 365
 
-                        # Trade return distribution
-                        _ch1, _ch2 = st.columns(2)
-                        with _ch1:
-                            _fig_dist = px.histogram(
-                                x=_gross_rets, nbins=30,
-                                title="Gross Return Distribution",
-                                labels={'x': 'Gross Return', 'count': 'Trades'},
-                                color_discrete_sequence=['#2c6fad'],
+                from asset_configs import get_spread_cost_lookup as _get_spread_lookup
+                _latest_px_dict = dict(zip(_instruments_bt, _prices_bt.iloc[-1].values))
+                _spread_lookup = _get_spread_lookup(_instruments_bt, _latest_px_dict, asset_key)
+
+                _bt_results = run_exhaustive_search(
+                    _scaled_bt, _day_ints_bt, _instruments_bt,
+                    display_names=_display_names_bt,
+                    min_long_legs=int(bt_min_long),
+                    max_long_legs=int(bt_max_long),
+                    min_short_legs=int(bt_min_short),
+                    max_short_legs=int(bt_max_short),
+                    vol_window=int(bt_vol_window),
+                    xing_sd=float(bt_xing_sd),
+                    exit_sd=float(bt_exit_sd),
+                    spread_cost_lookup=_spread_lookup,
+                    financing_daily_pct=_fin_daily,
+                    top_n=int(bt_top_n),
+                    sample_n=int(bt_sample),
+                    scoring_mode=bt_scoring_mode,
+                    progress_cb=_bt_progress,
+                )
+
+            _bt_progress_bar.progress(1.0)
+            _bt_status.empty()
+            st.session_state['bt_results_cache'] = {
+                'df': _bt_results,
+                'asset_key': asset_key,
+                'params': {
+                    'vol_window': int(bt_vol_window),
+                    'xing_sd': float(bt_xing_sd),
+                    'exit_sd': float(bt_exit_sd),
+                    'fin_rate': float(bt_fin_rate),
+                },
+            }
+
+        # ── Results display ───────────────────────────────────────────────────
+        _bt_cache = st.session_state.get('bt_results_cache')
+
+        if _bt_cache is not None:
+            _bt_df = _bt_cache['df']
+
+            if _bt_df.empty:
+                st.warning("No combinations produced trades with the current parameters.")
+            else:
+                st.success(f"Found **{len(_bt_df)}** results.")
+
+                # Summary metrics from top result
+                _top = _bt_df.iloc[0]
+                _m1, _m2, _m3, _m4, _m5 = st.columns(5)
+                _m1.metric("Top Trades",      f"{int(_top.get('Trades', 0)):,}")
+                _m2.metric("Win Rate",        f"{float(_top.get('WinRate', 0)):.1%}")
+                _m3.metric("Expectancy",      f"{float(_top.get('Expectancy', 0)):.3f}")
+                _m4.metric("Avg Holding",     f"{float(_top.get('AvgHolding', 0)):.0f}d")
+                _m5.metric("Payoff Ratio",    f"{float(_top.get('PayoffRatio', 0)):.2f}")
+
+                # Results table
+                st.subheader(f"Results (ranked by: {SCORING_MODES.get(bt_scoring_mode, bt_scoring_mode)})")
+                _bt_ordered = [
+                    'Config', 'Long', 'Short',
+                    'WinRate', 'Expectancy', 'NetExpectancy', 'EstCost', 'AvgHolding',
+                    'Trades', 'PayoffRatio',
+                    'ReturnSD', 'TrendVolRatio', 'ReturnTopology', 'FitDataMinMaxSD', 'LastSD',
+                ]
+                _bt_display_cols = [c for c in _bt_ordered if c in _bt_df.columns]
+                _bt_disp = _bt_df[_bt_display_cols].copy()
+                for _c in _bt_disp.columns:
+                    if _c in ('Long', 'Short', 'Config'):
+                        continue
+                    elif _c == 'WinRate':
+                        _bt_disp[_c] = _bt_disp[_c].map('{:.1%}'.format)
+                    elif _c == 'Trades':
+                        _bt_disp[_c] = _bt_disp[_c].map('{:.0f}'.format)
+                    elif _c == 'AvgHolding':
+                        _bt_disp[_c] = _bt_disp[_c].map(lambda v: f'{v:.0f}d')
+                    else:
+                        _bt_disp[_c] = _bt_disp[_c].map('{:.3f}'.format)
+                _tbl(_bt_disp, show_index=True)
+
+                # ── Charts ────────────────────────────────────────────────────
+                st.markdown("---")
+                st.subheader("Top Result — Trade Analysis")
+
+                # Re-run single backtest on top result to get trade-level data
+                _top_long  = list(_top.get('_long_flags', {}).keys()) if '_long_flags' in _bt_df.columns else []
+                _top_short = list(_top.get('_short_flags', {}).keys()) if '_short_flags' in _bt_df.columns else []
+
+                if '_long_flags' in _bt_df.columns and not _bt_df.iloc[0]['_long_flags'] == {}:
+                    try:
+                        _top_long_instr  = list(_bt_df.iloc[0]['_long_flags'].keys())
+                        _top_short_instr = list(_bt_df.iloc[0]['_short_flags'].keys())
+                        _all_instr = list(dict.fromkeys(_top_long_instr + _top_short_instr))
+
+                        # Re-run single backtest to get full trade array
+                        if hasattr(_scaled_bt, '__len__') and 'bt_results_cache' in st.session_state:
+                            pass  # scaled available from last run in this session
+
+                        with st.spinner("Computing trade details…"):
+                            _reload_prices, _reload_instr = load_asset_prices(csv_path) if csv_path.exists() else (_prices_bt, _instruments_bt)
+                            _reload_scaled, _reload_day_ints, _reload_index = prepare_returns(
+                                _reload_prices, _reload_instr,
+                                vol_window=int(bt_vol_window),
+                                window_days=bt_window_days,
                             )
-                            _fig_dist.add_vline(x=0, line_dash='dash', line_color='red')
-                            _fig_dist.update_layout(showlegend=False)
-                            st.plotly_chart(_fig_dist, use_container_width=True)
-
-                        with _ch2:
-                            _fig_hold = px.histogram(
-                                x=_hold_days, nbins=30,
-                                title="Holding Period Distribution (days)",
-                                labels={'x': 'Days', 'count': 'Trades'},
-                                color_discrete_sequence=['#2c6fad'],
+                            _long_mask  = np.array([1 if i in _top_long_instr  else 0 for i in _reload_instr], dtype=np.float64)
+                            _short_mask = np.array([1 if i in _top_short_instr else 0 for i in _reload_instr], dtype=np.float64)
+                            _n_long  = max(1, _long_mask.sum())
+                            _n_short = max(1, _short_mask.sum())
+                            _spread_ret = (
+                                (_reload_scaled @ (_long_mask / _n_long)) -
+                                (_reload_scaled @ (_short_mask / _n_short))
                             )
-                            _p50 = np.median(_hold_days)
-                            _p90 = np.percentile(_hold_days, 90)
-                            _fig_hold.add_vline(x=_p50, line_dash='dash', line_color='orange',
-                                                annotation_text=f"p50={_p50:.0f}d")
-                            _fig_hold.add_vline(x=_p90, line_dash='dot',  line_color='red',
-                                                annotation_text=f"p90={_p90:.0f}d")
-                            st.plotly_chart(_fig_hold, use_container_width=True)
-
-                        # Regime analysis
-                        _regime_data = regime_split(
-                            _single_bt['trades_raw'], _n_bt, _reload_index,
-                            financing_daily_pct=_fin_daily,
-                            n_legs=int(_n_long + _n_short),
-                        )
-                        if _regime_data:
-                            st.subheader("Regime Analysis")
-                            _reg_df = pd.DataFrame(_regime_data)
-                            _fig_reg = px.bar(
-                                _reg_df, x='regime', y=['gross_wr', 'avg_gross'],
-                                barmode='group',
-                                title="Win Rate & Expectancy by Regime",
-                                labels={'value': 'Value', 'variable': 'Metric'},
-                                color_discrete_sequence=['#2c6fad', '#f0a500'],
+                            _single_bt = run_backtest(
+                                _spread_ret, _reload_day_ints,
+                                vol_window=int(bt_vol_window),
+                                xing_sd=float(bt_xing_sd),
+                                exit_sd=float(bt_exit_sd),
+                                financing_daily_pct=_fin_daily,
+                                n_legs=int(_n_long + _n_short),
                             )
-                            st.plotly_chart(_fig_reg, use_container_width=True)
 
-                        # Sensitivity grid
-                        with st.expander("Sensitivity Analysis"):
-                            st.caption("Parameter sweep across entry SD, exit target, and financing rate.")
-                            with st.spinner("Running sensitivity grid…"):
-                                _sens_df = sensitivity_grid(
-                                    _spread_ret, _reload_day_ints,
-                                    vol_window=int(bt_vol_window),
-                                    n_legs=int(_n_long + _n_short),
+                        _n_bt = _single_bt['n_trades']
+                        if _n_bt > 0:
+                            _trades_arr = _single_bt['trades_raw'][:_n_bt]
+                            from numba_core import COL_GROSS_RETURN, COL_HOLDING_DAYS, COL_SIDE
+
+                            _gross_rets  = _trades_arr[:, COL_GROSS_RETURN]
+                            _hold_days   = _trades_arr[:, COL_HOLDING_DAYS]
+
+                            # Trade return distribution
+                            _ch1, _ch2 = st.columns(2)
+                            with _ch1:
+                                _fig_dist = px.histogram(
+                                    x=_gross_rets, nbins=30,
+                                    title="Gross Return Distribution",
+                                    labels={'x': 'Gross Return', 'count': 'Trades'},
+                                    color_discrete_sequence=['#2c6fad'],
                                 )
-                            _sens_disp = _sens_df[[
-                                'SD_Threshold', 'Exit_Target', 'Financing_Ann_Pct',
-                                'n_trades', 'net_wr', 'avg_net', 'avg_holding',
-                            ]].copy()
-                            _sens_disp.columns = [
-                                'Entry SD', 'Exit SD', 'Fin %pa',
-                                'Trades', 'Net WR', 'Net Exp', 'Avg Hold',
-                            ]
-                            for _c in ['Net WR']:
-                                _sens_disp[_c] = _sens_disp[_c].map('{:.1%}'.format)
-                            for _c in ['Net Exp']:
-                                _sens_disp[_c] = _sens_disp[_c].map('{:.4f}'.format)
-                            for _c in ['Avg Hold']:
-                                _sens_disp[_c] = _sens_disp[_c].map('{:.0f}d'.format)
-                            _tbl(_sens_disp, show_index=False)
+                                _fig_dist.add_vline(x=0, line_dash='dash', line_color='red')
+                                _fig_dist.update_layout(showlegend=False)
+                                st.plotly_chart(_fig_dist, use_container_width=True)
 
-                except Exception as _e:
-                    st.warning(f"Could not compute trade details: {_e}")
+                            with _ch2:
+                                _fig_hold = px.histogram(
+                                    x=_hold_days, nbins=30,
+                                    title="Holding Period Distribution (days)",
+                                    labels={'x': 'Days', 'count': 'Trades'},
+                                    color_discrete_sequence=['#2c6fad'],
+                                )
+                                _p50 = np.median(_hold_days)
+                                _p90 = np.percentile(_hold_days, 90)
+                                _fig_hold.add_vline(x=_p50, line_dash='dash', line_color='orange',
+                                                    annotation_text=f"p50={_p50:.0f}d")
+                                _fig_hold.add_vline(x=_p90, line_dash='dot',  line_color='red',
+                                                    annotation_text=f"p90={_p90:.0f}d")
+                                st.plotly_chart(_fig_hold, use_container_width=True)
 
-            # ── Export ────────────────────────────────────────────────────────
+                            # Regime analysis
+                            _regime_data = regime_split(
+                                _single_bt['trades_raw'], _n_bt, _reload_index,
+                                financing_daily_pct=_fin_daily,
+                                n_legs=int(_n_long + _n_short),
+                            )
+                            if _regime_data:
+                                st.subheader("Regime Analysis")
+                                _reg_df = pd.DataFrame(_regime_data)
+                                _fig_reg = px.bar(
+                                    _reg_df, x='regime', y=['gross_wr', 'avg_gross'],
+                                    barmode='group',
+                                    title="Win Rate & Expectancy by Regime",
+                                    labels={'value': 'Value', 'variable': 'Metric'},
+                                    color_discrete_sequence=['#2c6fad', '#f0a500'],
+                                )
+                                st.plotly_chart(_fig_reg, use_container_width=True)
+
+                            # Sensitivity grid
+                            with st.expander("Sensitivity Analysis"):
+                                st.caption("Parameter sweep across entry SD, exit target, and financing rate.")
+                                with st.spinner("Running sensitivity grid…"):
+                                    _sens_df = sensitivity_grid(
+                                        _spread_ret, _reload_day_ints,
+                                        vol_window=int(bt_vol_window),
+                                        n_legs=int(_n_long + _n_short),
+                                    )
+                                _sens_disp = _sens_df[[
+                                    'SD_Threshold', 'Exit_Target', 'Financing_Ann_Pct',
+                                    'n_trades', 'net_wr', 'avg_net', 'avg_holding',
+                                ]].copy()
+                                _sens_disp.columns = [
+                                    'Entry SD', 'Exit SD', 'Fin %pa',
+                                    'Trades', 'Net WR', 'Net Exp', 'Avg Hold',
+                                ]
+                                for _c in ['Net WR']:
+                                    _sens_disp[_c] = _sens_disp[_c].map('{:.1%}'.format)
+                                for _c in ['Net Exp']:
+                                    _sens_disp[_c] = _sens_disp[_c].map('{:.4f}'.format)
+                                for _c in ['Avg Hold']:
+                                    _sens_disp[_c] = _sens_disp[_c].map('{:.0f}d'.format)
+                                _tbl(_sens_disp, show_index=False)
+
+                    except Exception as _e:
+                        st.warning(f"Could not compute trade details: {_e}")
+
+                # ── Export ────────────────────────────────────────────────────
+                st.markdown("---")
+                if st.button("💾 Export results", key='bt_export'):
+                    import json as _json
+                    from datetime import datetime as _dt
+                    _ts = _dt.now().strftime('%Y%m%d_%H%M%S')
+                    _export_dir = _Path(__file__).parent / 'backtest_exports'
+                    _export_dir.mkdir(exist_ok=True)
+
+                    # Summary JSON
+                    _summary = {
+                        'timestamp': _ts,
+                        'asset_class': asset_key,
+                        'params': _bt_cache.get('params', {}),
+                        'n_results': len(_bt_df),
+                        'top_result': {k: v for k, v in _top.items()
+                                       if not k.startswith('_')},
+                    }
+                    (_export_dir / f'summary_{_ts}.json').write_text(
+                        _json.dumps(_summary, indent=2, default=str)
+                    )
+
+                    # Trade list CSV
+                    _export_cols = [c for c in _bt_df.columns if not c.startswith('_')]
+                    _bt_df[_export_cols].to_csv(_export_dir / f'results_{_ts}.csv')
+
+                    st.success(
+                        f"Exported to `backtest_exports/summary_{_ts}.json` "
+                        f"and `results_{_ts}.csv`"
+                    )
+
+    else:  # Cross-asset
+        from backtest import load_cross_asset_prices, prepare_returns_aligned
+        from asset_configs import get_spread_cost_lookup as _ca_get_spread_lookup
+
+        # ── Class selectors ───────────────────────────────────────────────────
+        _ca_col1, _ca_col2 = st.columns(2)
+        with _ca_col1:
+            _long_class = st.selectbox(
+                "Long-side asset class",
+                [k for k, _ in ASSET_CLASS_OPTIONS],
+                format_func=lambda k: dict(ASSET_CLASS_OPTIONS)[k],
+                key='bt_ca_long_class',
+            )
+        with _ca_col2:
+            _short_class = st.selectbox(
+                "Short-side asset class",
+                [k for k, _ in ASSET_CLASS_OPTIONS],
+                index=2,
+                format_func=lambda k: dict(ASSET_CLASS_OPTIONS)[k],
+                key='bt_ca_short_class',
+            )
+
+        if _long_class == _short_class:
+            st.warning(
+                "Long and short classes are the same — switch to Intra-asset mode "
+                "for same-class searches, which is faster."
+            )
+        else:
+            # ── Signal parameters ─────────────────────────────────────────────
+            with st.expander("Signal Parameters", expanded=True):
+                _ca_c1, _ca_c2, _ca_c3, _ca_c4 = st.columns(4)
+                _ca_vol  = _ca_c1.number_input("Vol window", 50, 500, 262, key='bt_ca_vol')
+                _ca_xing = _ca_c2.number_input("Entry SD", 0.5, 5.0, 2.0, 0.5, key='bt_ca_xing')
+                _ca_exit = _ca_c3.number_input(
+                    "Exit SD", 0.0, 2.0, 1.0, 0.5, key='bt_ca_exit',
+                    help="Q8 recommends 1.0 SD for cross-asset pairs (best balance of capture vs hold).",
+                )
+                _long_cfg = ASSET_CLASSES[_long_class]
+                _ca_fin  = _ca_c4.number_input(
+                    "Financing %pa", 0.0, 10.0,
+                    _long_cfg['financing']['long_rate'] * 100, 0.1,
+                    key='bt_ca_fin',
+                )
+
+            # ── Basket size ───────────────────────────────────────────────────
+            with st.expander("Basket Configuration", expanded=True):
+                _ca_bc1, _ca_bc2, _ca_bc3, _ca_bc4 = st.columns(4)
+                _ca_nl_min = _ca_bc1.number_input("Min long legs",  1, 4, 1, key='bt_ca_nl_min')
+                _ca_nl_max = _ca_bc2.number_input("Max long legs",  1, 4, 1, key='bt_ca_nl_max')
+                _ca_ns_min = _ca_bc3.number_input("Min short legs", 1, 4, 1, key='bt_ca_ns_min')
+                _ca_ns_max = _ca_bc4.number_input("Max short legs", 1, 4, 1, key='bt_ca_ns_max')
+
+                _ca_top_n  = st.number_input("Top N results", 10, 200, 50, key='bt_ca_top_n')
+                _ca_sample = st.number_input(
+                    "Sample size (0 = exhaustive)", 0, 20000, 0, key='bt_ca_sample',
+                    help="For 2v2+ baskets use 2,000–5,000. 1v1 is always exhaustive.",
+                )
+                _ca_scoring = st.selectbox(
+                    "Scoring mode",
+                    list(SCORING_MODES.keys()),
+                    format_func=lambda x: SCORING_MODES[x],
+                    key='bt_ca_scoring',
+                )
+
+            # ── Run ───────────────────────────────────────────────────────────
             st.markdown("---")
-            if st.button("💾 Export results", key='bt_export'):
-                import json as _json
-                from datetime import datetime as _dt
-                _ts = _dt.now().strftime('%Y%m%d_%H%M%S')
-                _export_dir = _Path(__file__).parent / 'backtest_exports'
-                _export_dir.mkdir(exist_ok=True)
+            _ca_run = st.button(
+                "▶  Run Cross-Asset Search",
+                type="primary",
+                use_container_width=True,
+                key='bt_ca_run',
+            )
 
-                # Summary JSON
-                _summary = {
-                    'timestamp': _ts,
-                    'asset_class': asset_key,
-                    'params': _bt_cache.get('params', {}),
-                    'n_results': len(_bt_df),
-                    'top_result': {k: v for k, v in _top.items()
-                                   if not k.startswith('_')},
-                }
-                (_export_dir / f'summary_{_ts}.json').write_text(
-                    _json.dumps(_summary, indent=2, default=str)
-                )
+            if _ca_run:
+                try:
+                    with st.spinner(f"Loading {_long_class} and {_short_class} prices..."):
+                        _ca_prices, _ca_long_i, _ca_short_i, _ca_cls_map = load_cross_asset_prices(
+                            _long_class, _short_class, _CACHE_DIR
+                        )
 
-                # Trade list CSV
-                _export_cols = [c for c in _bt_df.columns if not c.startswith('_')]
-                _bt_df[_export_cols].to_csv(_export_dir / f'results_{_ts}.csv')
+                    st.info(
+                        f"Loaded {len(_ca_long_i)} {_long_class} + "
+                        f"{len(_ca_short_i)} {_short_class} instruments. "
+                        f"Common trading days: {len(_ca_prices):,} "
+                        f"({_ca_prices.index[0].date()} – {_ca_prices.index[-1].date()})"
+                    )
 
-                st.success(
-                    f"Exported to `backtest_exports/summary_{_ts}.json` "
-                    f"and `results_{_ts}.csv`"
-                )
+                    with st.spinner("Preparing vol-scaled returns..."):
+                        _ca_long_sc, _ca_short_sc, _ca_day_ints, _ca_idx = prepare_returns_aligned(
+                            _ca_prices, _ca_long_i, _ca_short_i, vol_window=int(_ca_vol)
+                        )
+
+                    _ca_all_instr  = _ca_long_i + _ca_short_i
+                    _ca_all_scaled = np.concatenate([_ca_long_sc, _ca_short_sc], axis=1)
+
+                    _ca_latest_px = _ca_prices.iloc[-1].to_dict()
+                    _ca_lookup_long  = _ca_get_spread_lookup(_ca_long_i,  _ca_latest_px, _long_class)
+                    _ca_lookup_short = _ca_get_spread_lookup(_ca_short_i, _ca_latest_px, _short_class)
+                    _ca_spread_lookup = {**_ca_lookup_long, **_ca_lookup_short}
+
+                    _ca_fin_daily = (_ca_fin / 100) / 365
+
+                    _ca_total = (
+                        sum(len(list(combinations(_ca_long_i, k)))
+                            for k in range(int(_ca_nl_min), int(_ca_nl_max) + 1)) *
+                        sum(len(list(combinations(_ca_short_i, k)))
+                            for k in range(int(_ca_ns_min), int(_ca_ns_max) + 1))
+                    )
+                    st.caption(
+                        f"Search space: {_ca_total:,} combinations "
+                        f"({'exhaustive' if _ca_sample == 0 or _ca_sample >= _ca_total else f'sampling {_ca_sample:,}'})"
+                    )
+
+                    _ca_prog = st.progress(0.0, text="Searching...")
+
+                    with st.spinner("Running cross-asset search..."):
+                        _ca_df = run_exhaustive_search(
+                            _ca_all_scaled,
+                            _ca_day_ints,
+                            _ca_all_instr,
+                            long_instrument_subset=_ca_long_i,
+                            short_instrument_subset=_ca_short_i,
+                            min_long_legs=int(_ca_nl_min),
+                            max_long_legs=int(_ca_nl_max),
+                            min_short_legs=int(_ca_ns_min),
+                            max_short_legs=int(_ca_ns_max),
+                            vol_window=int(_ca_vol),
+                            xing_sd=float(_ca_xing),
+                            exit_sd=float(_ca_exit),
+                            spread_cost_lookup=_ca_spread_lookup,
+                            financing_daily_pct=_ca_fin_daily,
+                            top_n=int(_ca_top_n),
+                            sample_n=int(_ca_sample),
+                            scoring_mode=_ca_scoring,
+                            progress_cb=lambda p: _ca_prog.progress(p, text=f"Searching... {p:.0%}"),
+                        )
+
+                    _ca_prog.progress(1.0, text="Done")
+
+                    if _ca_df.empty:
+                        st.warning("No results found. Try relaxing basket size or exit threshold.")
+                    else:
+                        # ── Summary metrics ───────────────────────────────────
+                        _ca_net_pos = (_ca_df['NetExpectancy'] > 0).sum()
+                        _ca_m1, _ca_m2, _ca_m3, _ca_m4 = st.columns(4)
+                        _ca_m1.metric("Total results", len(_ca_df))
+                        _ca_m2.metric("Net+ pairs", f"{_ca_net_pos} ({_ca_net_pos/len(_ca_df):.0%})")
+                        _ca_m3.metric(
+                            "Best net expectancy",
+                            f"{_ca_df['NetExpectancy'].max()*100:+.2f}%"
+                        )
+                        _ca_m4.metric(
+                            "Avg holding (top 10)",
+                            f"{_ca_df.head(10)['AvgHolding'].mean():.0f}d"
+                        )
+
+                        # ── Results table ─────────────────────────────────────
+                        st.subheader(
+                            f"Results — {_long_class.title()} (long) vs "
+                            f"{_short_class.title()} (short) | "
+                            f"ranked by {SCORING_MODES.get(_ca_scoring, _ca_scoring)}"
+                        )
+
+                        _ca_disp = _ca_df.drop(
+                            columns=[c for c in _ca_df.columns if c.startswith('_')],
+                            errors='ignore',
+                        ).copy()
+
+                        _ca_pct_cols = {'WinRate', 'Expectancy', 'NetExpectancy', 'SpreadCost', 'FinCost'}
+                        _ca_day_cols = {'AvgHolding'}
+                        _ca_int_cols = {'Trades'}
+                        for _c in _ca_disp.columns:
+                            if _c in ('Config', 'Long', 'Short'):
+                                continue
+                            elif _c in _ca_pct_cols:
+                                _ca_disp[_c] = _ca_disp[_c].map('{:.1%}'.format)
+                            elif _c in _ca_day_cols:
+                                _ca_disp[_c] = _ca_disp[_c].map(lambda v: f'{v:.0f}d')
+                            elif _c in _ca_int_cols:
+                                _ca_disp[_c] = _ca_disp[_c].map('{:.0f}'.format)
+                            else:
+                                _ca_disp[_c] = _ca_disp[_c].map('{:.3f}'.format)
+
+                        _tbl(_ca_disp, show_index=True)
+
+                        # ── Net+ pairs highlight ──────────────────────────────
+                        if _ca_net_pos > 0:
+                            st.subheader("Net-positive pairs")
+                            _ca_net_df = _ca_df[_ca_df['NetExpectancy'] > 0].copy()
+                            _ca_net_df = _ca_net_df.sort_values('NetExpectancy', ascending=False)
+                            _ca_net_cols = [c for c in [
+                                'Long', 'Short', 'Config', 'WinRate', 'Expectancy',
+                                'NetExpectancy', 'AvgHolding', 'Trades', 'SpreadCost', 'FinCost',
+                            ] if c in _ca_net_df.columns]
+                            st.dataframe(
+                                _ca_net_df[_ca_net_cols].style.format({
+                                    'WinRate':       '{:.1%}',
+                                    'Expectancy':    '{:.2%}',
+                                    'NetExpectancy': '{:.2%}',
+                                    'AvgHolding':    '{:.0f}d',
+                                    'SpreadCost':    '{:.3%}',
+                                    'FinCost':       '{:.3%}',
+                                }),
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+
+                        # ── Q8 benchmark reference ────────────────────────────
+                        with st.expander("Q8 reference pairs (1.0 SD exit, 4.88% financing)"):
+                            st.markdown("""
+| Pair | Type | Net Exp | Median Hold | Trades |
+|------|------|---------|-------------|--------|
+| Platinum → AUD/USD | Cmd vs FX | +1.11% | 26d | 36 |
+| CAC → GBP/JPY | Eq vs FX | +1.21% | 34d | 49 |
+| STOXX50 → Wheat | Eq vs Cmd | +1.56% | 38d | 39 |
+| Platinum → US HY | Cmd vs FI | +1.54% | 36d | 33 |
+| FTSE → GBP/JPY | Eq vs FX | +0.94% | 33d | 53 |
+""")
+                            st.caption(
+                                "Note: Q8 used data from Jan 1999 – Apr 2026 (aligned). "
+                                "Results may differ slightly due to different data windows."
+                            )
+
+                except FileNotFoundError as _e:
+                    st.error(str(_e))
+                except ValueError as _e:
+                    st.error(str(_e))
+                except Exception as _e:
+                    st.error(f"Unexpected error: {_e}")
+                    raise
 
 
 # ════════════════════════════════════════════════════════════════════════════

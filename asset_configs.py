@@ -25,6 +25,7 @@ Usage in the backtest tab:
 EQUITY = {
     'label': 'Equity Indices',
     'csv_file': 'prices.csv',
+    'spread_cost_pct': 0.00037,   # avg equity CFD: ~0.037% per instrument (from config.SPREADS)
     'instruments': {
         'UKX': 'FTSE', 'CBK': 'CAC', 'CEY': 'MIB', 'CFR': 'DAX',
         'CMD': 'IBEX', 'CEI': 'STOXX50', 'COI': 'SMI', 'CRM': 'HSI',
@@ -55,6 +56,7 @@ EQUITY = {
 FX = {
     'label': 'FX Pairs',
     'csv_file': 'fx_prices.csv',
+    'spread_cost_pct': 0.0001,    # FX: ~0.01% per instrument (tight retail spreads)
     'instruments': {
         'EURUSD': 'EUR/USD', 'GBPUSD': 'GBP/USD', 'USDJPY': 'USD/JPY',
         'USDCHF': 'USD/CHF', 'AUDUSD': 'AUD/USD', 'NZDUSD': 'NZD/USD',
@@ -87,6 +89,7 @@ FX = {
 COMMODITIES = {
     'label': 'Commodities',
     'csv_file': 'commodity_prices.csv',
+    'spread_cost_pct': 0.0005,    # Commodity futures: ~0.05% per instrument (Q6 assumption)
     'instruments': {
         # Energy
         'WTI': 'WTI Crude', 'BRENT': 'Brent Crude', 'NATGAS': 'Natural Gas',
@@ -134,6 +137,7 @@ COMMODITIES = {
 FIXED_INCOME = {
     'label': 'Fixed Income',
     'csv_file': 'fi_prices.csv',
+    'spread_cost_pct': 0.0002,    # FI ETFs: ~0.02% per instrument (Q7 assumption)
     'instruments': {
         # US duration ladder
         'SHY': 'US 1-3Y', 'IEI': 'US 3-7Y', 'IEF': 'US 7-10Y', 'TLT': 'US 20+Y',
@@ -181,6 +185,14 @@ FIXED_INCOME = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# FI EXCLUSION LIST
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Yield series + non-liquid fund in fi_prices.csv — excluded from all backtests
+FI_EXCLUDE = frozenset({'UST10Y', 'UST30Y', 'UST5Y', 'IBTM'})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # REGISTRY — single lookup for the backtest tab
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -200,6 +212,97 @@ ASSET_CLASS_OPTIONS = [
 ]
 
 
+# Normalise short aliases used by test scripts to the canonical ASSET_CLASSES keys
+_KEY_ALIASES: dict[str, str] = {'commodity': 'commodities', 'fi': 'fixed_income'}
+
+
+def get_spread_cost_lookup(
+    instruments: list[str],
+    latest_prices: dict[str, float],
+    asset_key: str = 'equity',
+) -> dict[str, float]:
+    """
+    Return a per-instrument spread cost lookup (one-way %, as a fraction).
+
+    For equity instruments with entries in config.SPREADS and config.POINT_SIZES,
+    uses actual broker spread points divided by current price.
+    For all other instruments (FX, commodity, FI), uses the class-level flat rate.
+
+    Parameters
+    ----------
+    instruments : list[str]
+        Instrument codes (matching column names in the price CSV).
+    latest_prices : dict[str, float]
+        Most recent price per instrument (e.g. prices_df.iloc[-1].to_dict()).
+    asset_key : str
+        Asset class key used to look up the flat fallback rate.
+        Accepts canonical keys ('equity', 'fx', 'commodities', 'fixed_income')
+        and short aliases ('commodity', 'fi').
+
+    Returns
+    -------
+    dict[str, float]
+        {instrument_code: spread_cost_as_fraction} — one-way, pre-scaling.
+        A 1v1 round-trip basket cost = 4 × mean(values).
+    """
+    try:
+        from config import SPREADS, POINT_SIZES
+        has_config = True
+    except ImportError:
+        has_config = False
+
+    canonical_key = _KEY_ALIASES.get(asset_key, asset_key)
+    fallback = ASSET_CLASSES.get(canonical_key, {}).get('spread_cost_pct', 0.001)
+
+    lookup: dict[str, float] = {}
+    for inst in instruments:
+        price = latest_prices.get(inst, 0.0)
+        if has_config and inst in SPREADS and price > 0:
+            pt_size = POINT_SIZES.get(inst, 1.0)
+            lookup[inst] = (SPREADS[inst] * pt_size) / price
+        else:
+            lookup[inst] = fallback
+
+    return lookup
+
+
+def basket_spread_cost(
+    long_combo: tuple[int, ...],
+    short_combo: tuple[int, ...],
+    instruments: list[str],
+    spread_cost_lookup: dict[str, float],
+) -> float:
+    """
+    Compute the round-trip basket spread cost as a fraction of the spread return unit.
+
+    Formula: 4 × mean(spread_cost_pct_i for i in all combo instruments)
+
+    The factor of 4 comes from:
+      × 2  for entry + exit (round trip)
+      × 2  for long side + short side (both contribute to basket cost)
+    divided by n_legs (weight per instrument in the equally-weighted basket) — which
+    cancels the n_legs that appears when summing over all instruments.
+
+    Parameters
+    ----------
+    long_combo, short_combo : tuple[int, ...]
+        Index tuples into `instruments` list.
+    instruments : list[str]
+        Full instrument list (indexed by long_combo / short_combo values).
+    spread_cost_lookup : dict[str, float]
+        Per-instrument one-way cost fraction (from get_spread_cost_lookup()).
+
+    Returns
+    -------
+    float — total round-trip basket spread cost as fraction (e.g. 0.0015 = 0.15%)
+    """
+    all_instr = [instruments[i] for i in long_combo] + [instruments[i] for i in short_combo]
+    if not all_instr:
+        return 0.0
+    mean_cost = sum(spread_cost_lookup.get(inst, 0.001) for inst in all_instr) / len(all_instr)
+    return 4.0 * mean_cost
+
+
 def get_tradeable_instruments(asset_class_key: str) -> list[str]:
     """Return the list of tradeable instrument codes (excludes reference-only)."""
     cfg = ASSET_CLASSES[asset_class_key]
@@ -211,3 +314,16 @@ def get_display_name(asset_class_key: str, code: str) -> str:
     """Look up display name for an instrument code."""
     cfg = ASSET_CLASSES[asset_class_key]
     return cfg['instruments'].get(code, cfg.get('reference_instruments', {}).get(code, code))
+
+
+def get_cross_asset_label(long_class: str, short_class: str) -> str:
+    """Human-readable label for a cross-asset category pair."""
+    labels = {
+        'equity':      'Equity',
+        'fx':          'FX',
+        'commodity':   'Commodity',
+        'commodities': 'Commodity',
+        'fi':          'Fixed Income',
+        'fixed_income': 'Fixed Income',
+    }
+    return f"{labels.get(long_class, long_class)} vs {labels.get(short_class, short_class)}"

@@ -32,6 +32,7 @@ from numba_core import (
 )
 from search import _batch_scores
 from scoring import apply_scoring, estimate_trade_cost
+from asset_configs import basket_spread_cost as _basket_spread_cost, FI_EXCLUDE as _FI_EXCLUDE
 
 # Default parameters (matching config.py)
 DEFAULT_VOL_WINDOW = 262
@@ -120,6 +121,116 @@ def prepare_returns(
     day_ints = ((index - pd.Timestamp('1970-01-01')) // pd.Timedelta('1D')).values.astype(np.int64)
 
     return scaled, day_ints, index
+
+
+def load_cross_asset_prices(
+    long_class: str,
+    short_class: str,
+    cache_dir,
+    fi_exclude: frozenset = _FI_EXCLUDE,
+    start_date: str = '1999-01-01',
+    min_common_days: int = 500,
+) -> tuple:
+    """
+    Load and date-align prices from two asset class CSVs for cross-asset search.
+
+    Uses INNER JOIN on dates — only trading days present in BOTH datasets are kept.
+
+    Returns
+    -------
+    prices : pd.DataFrame
+        Unified price DataFrame (DatetimeIndex, all instruments as columns).
+    long_instruments : list[str]
+    short_instruments : list[str]
+    asset_class_map : dict[str, str]
+        {instrument_code: asset_class_key}
+    """
+    from asset_configs import ASSET_CLASSES, _KEY_ALIASES
+
+    cache_dir = Path(cache_dir)
+
+    def _load(cls: str) -> tuple:
+        canonical = _KEY_ALIASES.get(cls, cls)
+        cfg = ASSET_CLASSES[canonical]
+        path = cache_dir / cfg['csv_file']
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Price file not found: {path}\n"
+                f"Expected for asset class '{cls}'."
+            )
+        df, instruments = load_asset_prices(str(path), start_date=start_date)
+        if canonical == 'fixed_income':
+            instruments = [i for i in instruments if i not in fi_exclude]
+            df = df[instruments]
+        return df, instruments
+
+    long_prices,  long_instr  = _load(long_class)
+    short_prices, short_instr = _load(short_class)
+
+    overlap = set(long_instr) & set(short_instr)
+    if overlap:
+        raise ValueError(
+            f"Instrument code collision between '{long_class}' and '{short_class}': {overlap}"
+        )
+
+    common_idx = long_prices.index.intersection(short_prices.index)
+    if len(common_idx) < min_common_days:
+        raise ValueError(
+            f"Only {len(common_idx)} common trading days between "
+            f"'{long_class}' and '{short_class}' (minimum {min_common_days})."
+        )
+
+    prices = pd.concat([
+        long_prices.loc[common_idx,  long_instr],
+        short_prices.loc[common_idx, short_instr],
+    ], axis=1)
+
+    asset_class_map = (
+        {i: long_class  for i in long_instr} |
+        {i: short_class for i in short_instr}
+    )
+
+    return prices, long_instr, short_instr, asset_class_map
+
+
+def prepare_returns_aligned(
+    prices: pd.DataFrame,
+    long_instruments: list,
+    short_instruments: list,
+    vol_window: int = DEFAULT_VOL_WINDOW,
+    target_vol: float = DEFAULT_TARGET_VOL,
+    window_days: int | None = None,
+) -> tuple:
+    """
+    Vol-scale returns for a cross-asset unified price DataFrame.
+
+    Returns separate scaled arrays for long and short instruments,
+    plus a shared day_ints array aligned to the common date range.
+
+    Returns
+    -------
+    long_scaled  : np.ndarray (T, N_long)
+    short_scaled : np.ndarray (T, N_short)
+    day_ints     : np.ndarray (T,) int64
+    index        : pd.DatetimeIndex
+    """
+    all_instruments = long_instruments + short_instruments
+    rets = prices[all_instruments].pct_change().dropna(how='all')
+    vols = rets.rolling(vol_window, min_periods=vol_window // 2).std()
+    scalings = (target_vol / vols.replace(0, np.nan)).clip(upper=1.0).fillna(0.0)
+    scaled_df = (rets * scalings).dropna(how='any')
+
+    if window_days is not None:
+        scaled_df = scaled_df.tail(window_days)
+
+    index    = scaled_df.index
+    day_ints = ((index - pd.Timestamp('1970-01-01')) // pd.Timedelta('1D')).values.astype(np.int64)
+
+    n_long       = len(long_instruments)
+    long_scaled  = scaled_df[long_instruments].values.astype(np.float64)
+    short_scaled = scaled_df[short_instruments].values.astype(np.float64)
+
+    return long_scaled, short_scaled, day_ints, index
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -290,6 +401,8 @@ def run_exhaustive_search(
     day_ints: np.ndarray,
     instruments: list[str],
     display_names: dict[str, str] | None = None,
+    long_instrument_subset: list[str] | None = None,
+    short_instrument_subset: list[str] | None = None,
     min_long_legs: int = 3,
     max_long_legs: int = 3,
     min_short_legs: int = 3,
@@ -298,6 +411,7 @@ def run_exhaustive_search(
     xing_sd: float = DEFAULT_XING_SD,
     exit_sd: float = DEFAULT_EXIT_SD,
     spread_cost_pct: float = 0.001,
+    spread_cost_lookup: dict[str, float] | None = None,
     financing_daily_pct: float = 0.0,
     top_n: int = 30,
     sample_n: int = 0,
@@ -324,12 +438,27 @@ def run_exhaustive_search(
         Instrument codes matching columns of scaled.
     display_names : dict
         Code → display name mapping.  Defaults to codes.
+    long_instrument_subset : list[str] | None
+        If provided, only these instruments are eligible for the long basket.
+        Must be a subset of `instruments`. When None, all instruments are eligible.
+        Used for cross-asset search (e.g. long_instrument_subset = equity instruments).
+    short_instrument_subset : list[str] | None
+        Same as long_instrument_subset but for the short basket. When both are None
+        the function behaves identically to the current implementation (backward compat).
     min_long_legs, max_long_legs : int
         Leg count range for the long basket.
     min_short_legs, max_short_legs : int
         Leg count range for the short basket.
     vol_window, xing_sd, exit_sd : signal parameters
-    spread_cost_pct, financing_daily_pct : cost parameters
+    spread_cost_pct : float
+        Flat round-trip spread cost per instrument (used when spread_cost_lookup is None).
+    spread_cost_lookup : dict[str, float] | None
+        Per-instrument one-way spread cost as fraction (from asset_configs.get_spread_cost_lookup).
+        When provided, overrides spread_cost_pct for cost calculation using actual instrument
+        spreads. When None, falls back to the flat spread_cost_pct value.
+        Example: {'UKX': 0.00035, 'CBK': 0.00049, ...}
+    financing_daily_pct : float
+        Daily financing cost as fraction.
     top_n : int
         Number of top results to return.
     sample_n : int
@@ -353,25 +482,39 @@ def run_exhaustive_search(
 
     T, N = scaled.shape
 
-    # Pre-compute equal-weight basket returns for each leg size
-    leg_cache = {}
-    for k in set(list(range(min_long_legs, max_long_legs + 1)) +
-                 list(range(min_short_legs, max_short_legs + 1))):
-        combos = list(combinations(range(N), k))
-        # (T, M_k) matrix of equal-weight basket returns
-        basket_rets = np.zeros((T, len(combos)), dtype=np.float64)
-        for ci, combo in enumerate(combos):
-            for idx in combo:
-                basket_rets[:, ci] += scaled[:, idx]
-            basket_rets[:, ci] /= k
-        leg_cache[k] = (basket_rets, combos)
+    # Resolve instrument subsets to column index positions
+    all_idx   = list(range(N))
+    long_idx  = (
+        [instruments.index(i) for i in long_instrument_subset  if i in instruments]
+        if long_instrument_subset  is not None else all_idx
+    )
+    short_idx = (
+        [instruments.index(i) for i in short_instrument_subset if i in instruments]
+        if short_instrument_subset is not None else all_idx
+    )
+
+    # Pre-compute equal-weight basket returns for long and short sides separately
+    def _build_leg_cache(idx_list, k_min, k_max):
+        cache = {}
+        for k in range(k_min, k_max + 1):
+            combos = list(combinations(idx_list, k))
+            basket_rets = np.zeros((T, len(combos)), dtype=np.float64)
+            for ci, combo in enumerate(combos):
+                for idx in combo:
+                    basket_rets[:, ci] += scaled[:, idx]
+                basket_rets[:, ci] /= k
+            cache[k] = (basket_rets, combos)
+        return cache
+
+    leg_cache_long  = _build_leg_cache(long_idx,  min_long_legs,  max_long_legs)
+    leg_cache_short = _build_leg_cache(short_idx, min_short_legs, max_short_legs)
 
     # Enumerate all valid (non-overlapping) long/short pairs
     all_pairs = []
     for nl in range(min_long_legs, max_long_legs + 1):
-        _, long_combos = leg_cache[nl]
+        _, long_combos = leg_cache_long[nl]
         for ns in range(min_short_legs, max_short_legs + 1):
-            _, short_combos = leg_cache[ns]
+            _, short_combos = leg_cache_short[ns]
             for li, lc in enumerate(long_combos):
                 for si, sc in enumerate(short_combos):
                     if not (set(lc) & set(sc)):
@@ -391,10 +534,10 @@ def run_exhaustive_search(
     done = 0
 
     for nl in range(min_long_legs, max_long_legs + 1):
-        long_rets, long_combos = leg_cache[nl]
+        long_rets, long_combos = leg_cache_long[nl]
 
         for ns in range(min_short_legs, max_short_legs + 1):
-            short_rets, short_combos = leg_cache[ns]
+            short_rets, short_combos = leg_cache_short[ns]
             n_legs_total = nl + ns
 
             for li, long_combo in enumerate(long_combos):
@@ -421,7 +564,12 @@ def run_exhaustive_search(
 
                     avg_holding = float(br[BR_AVG_HOLDING])
                     # User-rate net (shown in results, reflects their actual broker cost)
-                    total_spread_cost = spread_cost_pct * n_legs_total * 2
+                    if spread_cost_lookup is not None:
+                        total_spread_cost = _basket_spread_cost(
+                            long_combo, short_combo, instruments, spread_cost_lookup
+                        )
+                    else:
+                        total_spread_cost = spread_cost_pct * n_legs_total * 2
                     avg_fin_cost = financing_daily_pct * n_legs_total * avg_holding
                     avg_net = float(br[BR_AVG_GROSS]) - total_spread_cost - avg_fin_cost
                     # Account-rate cost (used for cost_rank scoring mode)
