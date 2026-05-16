@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 cache/
+exit_sd_comparison_*.csv
+exit_sd_comparison_*.txt
