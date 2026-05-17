@@ -1,74 +1,88 @@
+"""
+account.py — Account settings and financing rate access.
+
+Reads from data/account.json which stores per-asset-class financing rates,
+spread cost fallback, starting capital, and margin. This replaces the legacy
+flat account.json format (long_rate / short_rate as top-level keys).
+"""
 import json
 from pathlib import Path
 
-from config import POINT_SIZES, SPREADS
+ACCOUNT_PATH = Path(__file__).parent / 'data' / 'account.json'
 
-# --- Persistence ---
-# account.json lives next to this file; stores user-edited settings across sessions
-ACCOUNT_PATH = Path(__file__).parent / 'account.json'
-
-# Fallback values used when account.json is absent or corrupt
 _DEFAULTS = {
     'starting_capital': 10000.0,
-    'long_rate':        0.0488,   # annual financing rate charged on long positions
-    'short_rate':       0.0088,   # annual rebate/cost on short positions
-    'margin':           0.0,
+    'margin': 0.10,
+    'spread_cost_fallback': 0.001,
+    'financing': {
+        'equity':       {'long_rate': 0.0488, 'short_rate': 0.0088},
+        'fx':           {'long_rate': 0.018,  'short_rate': -0.018},
+        'commodities':  {'long_rate': 0.0488, 'short_rate': 0.0088},
+        'fixed_income': {'long_rate': 0.0488, 'short_rate': 0.0088},
+    },
 }
 
 
-# --- Load / Save ---
-
 def load_account() -> dict:
-    # Return defaults if no file exists yet
-    if not ACCOUNT_PATH.exists():
-        return dict(_DEFAULTS)
+    """
+    Load account settings. Returns defaults if file missing or malformed.
+
+    Backward compatibility: also injects flat keys ('long_rate', 'short_rate')
+    so legacy callers (scoring.py estimate_trade_cost) continue to work.
+    The flat keys reflect equity rates — the most common legacy use case.
+    """
     try:
-        # Merge: file values override defaults, so new default keys are always present
-        return {**_DEFAULTS, **json.loads(ACCOUNT_PATH.read_text())}
-    except Exception:
-        return dict(_DEFAULTS)
+        data = json.loads(ACCOUNT_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = dict(_DEFAULTS)
+
+    if 'long_rate' not in data:
+        eq = data.get('financing', {}).get('equity', {})
+        data['long_rate']  = eq.get('long_rate',  0.0488)
+        data['short_rate'] = eq.get('short_rate', 0.0088)
+
+    return data
+
+
+def get_financing_rates(asset_class: str) -> tuple[float, float]:
+    """
+    Return (long_rate, short_rate) for an asset class.
+
+    Parameters
+    ----------
+    asset_class : str
+        One of 'equity', 'fx', 'commodities', 'fixed_income'.
+
+    Returns
+    -------
+    (long_rate, short_rate) as annual fractions.
+    short_rate is positive for a rebate, negative if both sides pay.
+    """
+    acct = load_account()
+    financing = acct.get('financing', _DEFAULTS['financing'])
+    rates = financing.get(asset_class, financing.get('equity', {}))
+    return (
+        rates.get('long_rate',  _DEFAULTS['financing']['equity']['long_rate']),
+        rates.get('short_rate', _DEFAULTS['financing']['equity']['short_rate']),
+    )
+
+
+def get_spread_cost_fallback() -> float:
+    """Return the fallback spread cost fraction for unknown instruments."""
+    return load_account().get('spread_cost_fallback',
+                              _DEFAULTS['spread_cost_fallback'])
+
+
+def get_starting_capital() -> float:
+    return load_account().get('starting_capital', _DEFAULTS['starting_capital'])
+
+
+def get_margin() -> float:
+    return load_account().get('margin', _DEFAULTS['margin'])
 
 
 def save_account(data: dict) -> None:
-    ACCOUNT_PATH.write_text(json.dumps(data, indent=2))
-
-
-# --- Daily Financing Cost ---
-
-def compute_daily_funding(
-    open_trades: list,
-    current_prices: dict,
-    long_rate: float,
-    short_rate: float,
-) -> float:
-    # Accumulate notional exposure for long and short sides separately
-    long_val = short_val = 0.0
-    for trade in open_trades:
-        for leg in trade.get('legs', []):
-            pct = leg.get('pct_open', 0.0)
-            if pct < 1e-6:
-                continue  # leg is fully closed, skip
-            bi, si = leg['buy_instrument'], leg['sell_instrument']
-            # Use live price where available, fall back to entry price
-            bp = current_prices.get(bi, leg['buy_entry_price'])
-            sp = current_prices.get(si, leg['sell_entry_price'])
-            # Notional = stake * fraction_open * price * point_size
-            long_val  += leg['buy_stake']  * pct * bp * POINT_SIZES.get(bi, 1.0)
-            short_val += leg['sell_stake'] * pct * sp * POINT_SIZES.get(si, 1.0)
-    # Net daily charge: longs pay the long rate, shorts receive the short rate
-    return long_val * long_rate / 365 - short_val * short_rate / 365
-
-
-# --- Spread Cost (one-off entry cost) ---
-
-def compute_spread_costs(open_trades: list) -> float:
-    # Sum the bid/ask spread cost for every leg across all open trades
-    total = 0.0
-    for trade in open_trades:
-        for leg in trade.get('legs', []):
-            bi = leg['buy_instrument']
-            si = leg['sell_instrument']
-            # Cost = stake * spread_in_points * point_size (converts to £/$ value)
-            total += leg['buy_stake']  * SPREADS.get(bi, 0.0) * POINT_SIZES.get(bi, 1.0)
-            total += leg['sell_stake'] * SPREADS.get(si, 0.0) * POINT_SIZES.get(si, 1.0)
-    return total
+    """Persist account settings atomically."""
+    tmp = ACCOUNT_PATH.with_suffix('.tmp')
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(ACCOUNT_PATH)

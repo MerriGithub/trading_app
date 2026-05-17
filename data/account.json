@@ -1,0 +1,23 @@
+{
+    "starting_capital": 10000.0,
+    "margin": 0.10,
+    "spread_cost_fallback": 0.001,
+    "financing": {
+        "equity": {
+            "long_rate": 0.0488,
+            "short_rate": 0.0088
+        },
+        "fx": {
+            "long_rate": 0.018,
+            "short_rate": -0.018
+        },
+        "commodities": {
+            "long_rate": 0.0488,
+            "short_rate": 0.0088
+        },
+        "fixed_income": {
+            "long_rate": 0.0488,
+            "short_rate": 0.0088
+        }
+    }
+}
