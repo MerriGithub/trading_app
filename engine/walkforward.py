@@ -27,12 +27,12 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr, ttest_ind
 
-from numba_core import (
+from engine.numba_core import (
     batch_backtest,
     BR_N_TRADES, BR_GROSS_WR, BR_AVG_GROSS, BR_AVG_HOLDING,
 )
-from search import _batch_scores
-from scoring import apply_scoring, estimate_trade_cost
+from engine.search import _batch_scores
+from engine.scoring import apply_scoring, estimate_trade_cost
 
 _TDY = 262  # trading days per year
 

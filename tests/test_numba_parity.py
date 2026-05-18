@@ -26,7 +26,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from numba_core import (
+from engine.numba_core import (
     _ref_rolling_mean_std, _ref_detect_trades, _ref_batch_backtest,
     rolling_mean_std, detect_trades, batch_backtest,
     backtest_spread, HAS_NUMBA,

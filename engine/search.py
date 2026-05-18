@@ -14,11 +14,11 @@ import numpy as np
 import pandas as pd
 
 from config import ACTIVE_INSTRUMENTS, DISPLAY_NAMES, PARAMS
-from numba_core import (
+from engine.numba_core import (
     batch_backtest,
     BR_N_TRADES, BR_GROSS_WR, BR_AVG_GROSS, BR_AVG_HOLDING, BR_PAYOFF_RATIO,
 )
-from scoring import apply_scoring, estimate_trade_cost
+from engine.scoring import apply_scoring, estimate_trade_cost
 
 _TDY = PARAMS['trading_days_per_year']
 

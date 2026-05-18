@@ -139,4 +139,4 @@ class Portfolio:
         return pd.DataFrame(series).corr()
 
     def capital_at_risk(self, current_prices: dict) -> float:
-        raise NotImplementedError('Deferred to Sprint 2')
+        raise NotImplementedError('Deferred to Sprint 3')

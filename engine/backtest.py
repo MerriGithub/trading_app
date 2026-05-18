@@ -23,15 +23,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from numba_core import (
+from engine.numba_core import (
     backtest_spread, batch_backtest, detect_trades,
     rolling_mean_std, COL_ENTRY_IDX, COL_EXIT_IDX, COL_SIDE,
     COL_GROSS_RETURN, COL_HOLDING_DAYS,
     BR_N_TRADES, BR_GROSS_WR, BR_AVG_GROSS, BR_AVG_HOLDING,
     BR_AVG_WINNER, BR_AVG_LOSER, BR_PAYOFF_RATIO, BR_TOTAL_GROSS_PNL,
 )
-from search import _batch_scores
-from scoring import apply_scoring, estimate_trade_cost
+from engine.search import _batch_scores
+from engine.scoring import apply_scoring, estimate_trade_cost
 from asset_configs import basket_spread_cost as _basket_spread_cost, FI_EXCLUDE as _FI_EXCLUDE
 
 # Default parameters (matching config.py)

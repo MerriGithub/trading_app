@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Skill(obsidian-save)",
-      "Skill(obsidian-save:*)"
+      "Skill(obsidian-save:*)",
+      "PowerShell($py = \"C:\\\\Users\\\\gordo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe\"; Set-Location \"C:\\\\Users\\\\gordo\\\\Documents\\\\trading_app\"; & $py -m pytest tests/ -v 2>&1)"
     ]
   }
 }

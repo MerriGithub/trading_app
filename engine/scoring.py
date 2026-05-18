@@ -44,7 +44,8 @@ def estimate_trade_cost(
     avg_holding_days: float,
     n_long: int,
     n_short: int,
-    spread_cost_pct: float = 0.001,
+    spread_cost_pct: float | None = None,
+    asset_class: str = 'equity',
 ) -> float:
     """
     Estimate total round-trip cost per trade.
@@ -54,15 +55,19 @@ def estimate_trade_cost(
     spread  = spread_cost_pct × (n_long + n_short) × 2  (entry + exit, both legs)
     finance = (long_rate × n_long + short_rate × n_short) / 365 × avg_holding_days
 
-    Rates are read from account.json so they reflect the user's actual broker
-    terms rather than hardcoded defaults.
+    Rates are read from account.json via get_financing_rates(asset_class)
+    so FX / commodity / fixed-income legs use the correct per-class rates.
+
+    TODO Sprint 3: flip short_rate sign to (long - short) once benchmarks
+    are re-baselined against the new convention.
     """
-    acct = load_account()
-    long_rate  = acct.get('long_rate',  0.0488)
-    short_rate = acct.get('short_rate', 0.0088)
+    from account import get_financing_rates, get_spread_cost_fallback
+    long_rate, short_rate = get_financing_rates(asset_class)
+    if spread_cost_pct is None:
+        spread_cost_pct = get_spread_cost_fallback()
     n_legs = n_long + n_short
     spread  = spread_cost_pct * n_legs * 2
-    finance = (long_rate * n_long + short_rate * n_short) / 365 * avg_holding_days
+    finance = (long_rate * n_long + short_rate * n_short) / 365 * avg_holding_days  # legacy sign
     return spread + finance
 
 
