@@ -740,12 +740,9 @@ with tab4:
         corr = pd.DataFrame()
         st.warning(f"Correlation unavailable: {e}")
 
-    if not corr.empty:
+    if len(corr) > 1:
         st.caption("Pairs with correlation > 0.5 may not be fully independent.")
-        st.dataframe(
-            corr.style.background_gradient(cmap='RdBu_r', vmin=-1, vmax=1).format('{:.2f}'),
-            use_container_width=True,
-        )
+        st.dataframe(corr.round(2), use_container_width=True)
     else:
         st.caption("Need at least 2 open positions for correlation.")
 
