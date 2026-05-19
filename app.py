@@ -440,7 +440,8 @@ with tab1:
                 pc3.metric("Net P&L", f"£{pos.net_pnl(cp):+,.0f}")
 
                 if st.button("Open in Pair Analysis →", key=f"view_{pos.id}"):
-                    st.session_state['selected_pair'] = pos.id
+                    st.session_state['pa_pair'] = f"{pos.name} ({pos.id})"
+                    st.toast(f"Selected {pos.name} — open the Pair Analysis tab", icon="📈")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -452,13 +453,9 @@ with tab2:
 
     # Mode selector
     pair_choices = ['— Custom pair —'] + [f"{p.name} ({p.id})" for p in portfolio.open_positions]
-    default_idx = 0
-    if 'selected_pair' in st.session_state:
-        for i, p in enumerate(portfolio.open_positions, 1):
-            if p.id == st.session_state['selected_pair']:
-                default_idx = i
-                break
-    pair_choice = st.selectbox("Pair", pair_choices, index=default_idx, key="pa_pair")
+    if st.session_state.get('pa_pair') not in pair_choices:
+        st.session_state['pa_pair'] = '— Custom pair —'
+    pair_choice = st.selectbox("Pair", pair_choices, key="pa_pair")
 
     basket = None
     open_pos: Position | None = None
