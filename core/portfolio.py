@@ -139,4 +139,25 @@ class Portfolio:
         return pd.DataFrame(series).corr()
 
     def capital_at_risk(self, current_prices: dict) -> float:
-        raise NotImplementedError('Deferred to Sprint 3')
+        """
+        Parametric VaR estimate: sum of 2-SD 10-day loss per open position.
+        Uses position stakes × instrument vol × sqrt(10) × 2.
+        Not a full portfolio VaR (does not account for cross-position correlation).
+        """
+        from core.data_registry import DataRegistry
+
+        registry = DataRegistry(Path(__file__).parent.parent / 'cache')
+
+        total_car = 0.0
+        for pos in self.open_positions:
+            try:
+                vols = registry.get_vols(pos.basket.all_instruments)
+                for inst, stake in pos.stakes.items():
+                    price     = current_prices.get(inst, pos.entry_prices.get(inst, 0.0))
+                    daily_vol = vols.get(inst, 0.02)
+                    notional  = abs(stake) * price
+                    car_10d   = notional * daily_vol * (10 ** 0.5) * 2
+                    total_car += car_10d * pos.pct_open
+            except Exception:
+                pass
+        return total_car

@@ -114,10 +114,11 @@ class DataRegistry:
         self,
         instruments: list[str],
         target_vol: float = 0.01,
+        window: int = 262,
     ) -> dict[str, float]:
-        vols = self.get_vols(instruments)
+        vols = self.get_vols(instruments, window=window)
         return {
-            inst: (target_vol / v if v > 0 else 1.0)
+            inst: min(1.0, target_vol / v) if v > 0 else 1.0
             for inst, v in vols.items()
         }
 
@@ -130,33 +131,103 @@ class DataRegistry:
         Fetch intraday prices for instruments that have an intraday_ticker.
         Returns None if no instruments have intraday data available.
         Partial results valid — returns what is available.
+        Never raises — returns None on any error.
         """
-        import yfinance as yf
-        from asset_configs import get_intraday_ticker
+        try:
+            import yfinance as yf
+            from asset_configs import get_intraday_ticker
 
-        tickers = {inst: get_intraday_ticker(inst) for inst in instruments}
-        tradeable = {inst: t for inst, t in tickers.items() if t is not None}
+            tickers = {inst: get_intraday_ticker(inst) for inst in instruments}
+            tradeable = {inst: t for inst, t in tickers.items() if t is not None}
 
-        if not tradeable:
+            if not tradeable:
+                return None
+
+            raw = yf.download(
+                list(tradeable.values()),
+                period='1d',
+                interval=interval,
+                auto_adjust=True,
+                progress=False,
+            )
+            if raw.empty:
+                return None
+
+            ticker_to_inst = {v: k for k, v in tradeable.items()}
+            if isinstance(raw.columns, pd.MultiIndex):
+                close = raw['Close'].rename(columns=ticker_to_inst)
+            else:
+                close = raw[['Close']].rename(columns={'Close': list(tradeable.keys())[0]})
+
+            available = [c for c in close.columns if c in instruments]
+            return close[available] if available else None
+        except Exception:
             return None
-
-        raw = yf.download(
-            list(tradeable.values()),
-            period='1d',
-            interval=interval,
-            auto_adjust=True,
-            progress=False,
-        )
-        if raw.empty:
-            return None
-
-        ticker_to_inst = {v: k for k, v in tradeable.items()}
-        if isinstance(raw.columns, pd.MultiIndex):
-            close = raw['Close'].rename(columns=ticker_to_inst)
-        else:
-            close = raw[['Close']].rename(columns={'Close': list(tradeable.keys())[0]})
-
-        return close
 
     def refresh(self, instruments: list[str] | None = None) -> None:
-        raise NotImplementedError('Deferred to Sprint 2')
+        """
+        Append latest EOD data from Yahoo Finance to cache CSVs for the given
+        instruments (or all if None). No-op if already up to date. Never raises.
+        """
+        try:
+            import yfinance as yf
+            from asset_configs import ASSET_CLASSES
+
+            # Group instruments by CSV file to minimise download calls
+            csv_groups: dict[str, dict] = {}
+            for cfg in ASSET_CLASSES.values():
+                csv_file = cfg.get('csv_file')
+                if not csv_file:
+                    continue
+                for code, details in cfg.get('instruments', {}).items():
+                    if instruments and code not in instruments:
+                        continue
+                    if not isinstance(details, dict):
+                        continue
+                    ticker = details.get('yahoo_ticker') or details.get('intraday_ticker')
+                    if not ticker:
+                        continue
+                    csv_groups.setdefault(csv_file, {})[code] = ticker
+
+            for csv_filename, ticker_map in csv_groups.items():
+                csv_path = self._cache / csv_filename
+                if not csv_path.exists():
+                    continue
+
+                try:
+                    existing = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+                    last_date = existing.index.max()
+                    fetch_start = (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                    today = pd.Timestamp.today().strftime('%Y-%m-%d')
+
+                    if fetch_start >= today:
+                        continue
+
+                    tickers = list(ticker_map.values())
+                    new_data = yf.download(
+                        tickers,
+                        start=fetch_start,
+                        end=today,
+                        progress=False,
+                        auto_adjust=True,
+                    )
+                    if new_data.empty:
+                        continue
+
+                    if isinstance(new_data.columns, pd.MultiIndex):
+                        new_close = new_data['Close'].copy()
+                    else:
+                        new_close = new_data[['Close']].copy()
+
+                    reverse_map = {v: k for k, v in ticker_map.items()}
+                    new_close.rename(columns=reverse_map, inplace=True)
+                    new_close.index.name = 'Date'
+
+                    combined = pd.concat([existing, new_close])
+                    combined = combined[~combined.index.duplicated(keep='first')]
+                    combined.sort_index(inplace=True)
+                    combined.to_csv(csv_path)
+                except Exception:
+                    pass
+        except Exception:
+            pass

@@ -111,10 +111,38 @@ if 'leg_count' not in st.session_state:
     st.session_state['leg_count'] = 1
 
 
+# ── Signal alert helper ───────────────────────────────────────────────────────
+def _check_signal_alerts(portfolio: Portfolio, registry: DataRegistry) -> list[dict]:
+    alerts = []
+    for pos in portfolio.open_positions:
+        try:
+            prices_hist = registry.get_daily_prices(pos.basket.all_instruments)
+            signal = SpreadSignal(basket=pos.basket, prices=prices_hist)
+            state  = signal.signal_state
+            if state != 'NONE':
+                alerts.append({
+                    'position':  pos.name,
+                    'pair':      ' / '.join(pos.basket.all_instruments),
+                    'state':     state,
+                    'sd':        signal.current_sd,
+                    'days_held': pos.days_held,
+                })
+        except Exception:
+            pass
+    return alerts
+
+
+# ── Alert pre-computation (once per page load) ────────────────────────────────
+if 'signal_alerts' not in st.session_state:
+    st.session_state['signal_alerts'] = _check_signal_alerts(portfolio, registry)
+
+_n_alerts = len(st.session_state['signal_alerts'])
+
 # ── Tabs ──────────────────────────────────────────────────────────────────────
+_live_label = f"⏱ Live 🔔 {_n_alerts}" if _n_alerts > 0 else "⏱ Live"
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📊 Monitor", "📈 Pair Analysis", "🧮 Stake Calc", "🗂 Portfolio",
-    "🔍 Search", "⏱ Live", "📓 Journal", "🔬 Backtest", "🔄 Walk-Forward",
+    "🔍 Search", _live_label, "📓 Journal", "🔬 Backtest", "🔄 Walk-Forward",
 ])
 
 
@@ -570,8 +598,7 @@ with tab2:
 # ════════════════════════════════════════════════════════════════════════════
 with tab3:
     st.header("Stake Calculator")
-    st.caption("Vol-targeted stake sizing across any asset class. "
-               "Uses DataRegistry's default 262-day vol window.")
+    st.caption("Vol-targeted stake sizing across any asset class.")
 
     sc1, sc2 = st.columns(2)
     long_picks  = sc1.multiselect(
@@ -586,6 +613,8 @@ with tab3:
     )
     target_1sd = st.number_input("Target 1 SD exposure (£)", value=500.0, step=50.0,
                                  min_value=50.0, key="sc_target")
+    vol_window = st.slider("Vol window (days)", min_value=130, max_value=524,
+                            value=262, step=1, key="tab3_vol_window")
 
     if long_picks and short_picks:
         try:
@@ -596,8 +625,8 @@ with tab3:
             basket = None
 
         if basket is not None:
-            vols     = registry.get_vols(basket.all_instruments)       # default 262-day window
-            scalings = registry.get_scalings(basket.all_instruments, target_vol=0.01)
+            vols     = registry.get_vols(basket.all_instruments, window=vol_window)
+            scalings = registry.get_scalings(basket.all_instruments, target_vol=0.01, window=vol_window)
             latest   = registry.get_latest_prices(basket.all_instruments)
 
             rows = []
@@ -724,11 +753,10 @@ with tab4:
 
     # Section 4 — Capital at risk
     st.subheader("Capital at risk")
-    try:
-        car = portfolio.capital_at_risk(current_prices)
-        st.metric("Capital at risk (2 SD)", f"£{car:,.0f}")
-    except NotImplementedError:
-        st.info("⚠️ Capital at risk calculation deferred to Sprint 3.")
+    car = portfolio.capital_at_risk(current_prices)
+    st.metric("Capital at risk (2 SD, 10-day)", f"£{car:,.0f}",
+              help="Parametric VaR: 2 SD × √10 loss estimate per open position. "
+                   "Does not account for cross-position correlation.")
 
     st.markdown("---")
 
@@ -924,10 +952,171 @@ with tab5:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 6 — Live (placeholder)
+# TAB 6 — Live Monitor
 # ════════════════════════════════════════════════════════════════════════════
 with tab6:
-    st.info("🔄 Live monitoring coming in Sprint 3.")
+    import datetime as _dt
+    import time as _time
+
+    st.header("Live Monitor")
+
+    # ── Refresh controls ─────────────────────────────────────────────────────
+    col_refresh, col_last = st.columns([1, 3])
+    with col_refresh:
+        if st.button("🔄 Refresh now", key="tab6_refresh"):
+            open_insts = list({
+                inst
+                for pos in portfolio.open_positions
+                for inst in pos.basket.all_instruments
+            })
+            if open_insts:
+                with st.spinner("Refreshing prices…"):
+                    registry.refresh(open_insts)
+                st.session_state['signal_alerts'] = _check_signal_alerts(portfolio, registry)
+                st.success("Prices updated.")
+
+    with col_last:
+        _csv_path = _CACHE_DIR / 'prices.csv'
+        if _csv_path.exists():
+            _mtime = _dt.datetime.fromtimestamp(_csv_path.stat().st_mtime)
+            st.caption(f"Cache last modified: {_mtime.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # Auto-refresh toggle
+    _auto_refresh = st.checkbox("Auto-refresh every 5 minutes", value=False,
+                                key="tab6_auto_refresh")
+    if _auto_refresh:
+        if 'tab6_last_refresh' not in st.session_state:
+            st.session_state['tab6_last_refresh'] = _time.time()
+        _elapsed = _time.time() - st.session_state['tab6_last_refresh']
+        st.caption(f"Auto-refresh ON — next in {max(0, 300 - int(_elapsed))}s")
+        if _elapsed > 300:
+            st.session_state['tab6_last_refresh'] = _time.time()
+            _all_open = [
+                inst
+                for pos in portfolio.open_positions
+                for inst in pos.basket.all_instruments
+            ]
+            registry.refresh(_all_open)
+            st.session_state['signal_alerts'] = _check_signal_alerts(portfolio, registry)
+            st.rerun()
+
+    st.divider()
+
+    # ── Signal alerts ────────────────────────────────────────────────────────
+    _alerts = st.session_state.get('signal_alerts', [])
+    for alert in _alerts:
+        if alert['state'] == 'EXIT':
+            st.success(
+                f"🟢 **EXIT SIGNAL** — {alert['position']} ({alert['pair']}) "
+                f"is at {alert['sd']:+.2f} SD after {alert['days_held']} days. "
+                f"Consider closing via the Journal tab."
+            )
+        else:
+            st.warning(
+                f"🟡 **SIGNAL ACTIVE** — {alert['position']} ({alert['pair']}) "
+                f"is at {alert['sd']:+.2f} SD."
+            )
+
+    # ── Open position live cards ──────────────────────────────────────────────
+    if not portfolio.open_positions:
+        st.info("No open positions. Open a trade via the Journal tab.")
+    else:
+        st.subheader("Open Positions — Live")
+
+        for _pos in portfolio.open_positions:
+            _insts = _pos.basket.all_instruments
+            _daily_prices = registry.get_latest_prices(_insts)
+            _intraday_df  = registry.get_intraday(_insts, interval='5m')
+
+            with st.expander(
+                f"**{_pos.name}** — {' × '.join(ALL_DISPLAY.get(i, i) for i in _insts)}",
+                expanded=True,
+            ):
+                col_signal, col_prices, col_intraday = st.columns([2, 2, 3])
+
+                with col_signal:
+                    st.markdown("**Signal**")
+                    try:
+                        _ph = registry.get_daily_prices(_insts)
+                        _sig = SpreadSignal(basket=_pos.basket, prices=_ph)
+                        _sd    = _sig.current_sd
+                        _state = _sig.signal_state
+                        st.metric("SD distance", f"{_sd:+.3f}")
+                        st.caption({
+                            'EXIT':        '🟢 Near exit target',
+                            'LONG_ENTRY':  '🟡 At entry level',
+                            'SHORT_ENTRY': '🟡 At entry level',
+                            'NONE':        '⚪ Holding',
+                        }.get(_state, _state))
+                        _norm = min(max((_sd + 3) / 6, 0.0), 1.0)
+                        st.progress(_norm)
+                    except Exception as _e:
+                        st.caption(f"Signal unavailable: {_e}")
+
+                with col_prices:
+                    st.markdown("**Latest Prices (EOD)**")
+                    for _inst in _insts:
+                        _price = _daily_prices.get(_inst)
+                        _entry = _pos.entry_prices.get(_inst)
+                        if _price and _entry:
+                            _pct = (_price - _entry) / _entry * 100
+                            _side = "Long" if _inst in _pos.basket.long_legs else "Short"
+                            st.metric(
+                                f"{ALL_DISPLAY.get(_inst, _inst)} ({_side})",
+                                f"{_price:,.4f}",
+                                delta=f"{_pct:+.2f}% vs entry",
+                            )
+
+                with col_intraday:
+                    st.markdown("**Intraday**")
+                    if _intraday_df is not None and not _intraday_df.empty:
+                        for _inst in _insts:
+                            if _inst in _intraday_df.columns:
+                                st.caption(ALL_DISPLAY.get(_inst, _inst))
+                                _chart = _intraday_df[[_inst]].dropna()
+                                if not _chart.empty:
+                                    st.line_chart(_chart, height=120)
+                    else:
+                        st.caption("Intraday data not available.")
+                        st.caption("Showing EOD monitoring only.")
+
+                # P&L summary row
+                _pnl     = _pos.live_pnl(_daily_prices)
+                _fin     = _pos.financing_cost_to_date()
+                _net_pnl = _pos.net_pnl(_daily_prices)
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Days held", _pos.days_held)
+                c2.metric("Unrealised P&L", f"£{_pnl:+,.0f}")
+                c3.metric("Financing drag", f"-£{_fin:,.0f}")
+                c4.metric("Net P&L", f"£{_net_pnl:+,.0f}",
+                           delta="▲" if _net_pnl > 0 else "▼",
+                           delta_color="normal")
+
+    st.divider()
+
+    # ── Market overview ───────────────────────────────────────────────────────
+    st.subheader("Market Overview")
+    _all_open_insts = list({
+        inst
+        for pos in portfolio.open_positions
+        for inst in pos.basket.all_instruments
+    })
+    if _all_open_insts:
+        _latest = registry.get_latest_prices(_all_open_insts)
+        _overview = [
+            {
+                'Instrument': ALL_DISPLAY.get(inst, inst),
+                'Code':       inst,
+                'Latest Price': _latest.get(inst, 'N/A'),
+            }
+            for inst in _all_open_insts
+        ]
+        st.dataframe(
+            pd.DataFrame(_overview).set_index('Code'),
+            use_container_width=True,
+        )
+    else:
+        st.caption("No open positions — no instruments to monitor.")
 
 
 # ════════════════════════════════════════════════════════════════════════════

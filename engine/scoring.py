@@ -57,9 +57,7 @@ def estimate_trade_cost(
 
     Rates are read from account.json via get_financing_rates(asset_class)
     so FX / commodity / fixed-income legs use the correct per-class rates.
-
-    TODO Sprint 3: flip short_rate sign to (long - short) once benchmarks
-    are re-baselined against the new convention.
+    Short rebate is subtracted (offset) to match Basket.financing_cost_daily().
     """
     from account import get_financing_rates, get_spread_cost_fallback
     long_rate, short_rate = get_financing_rates(asset_class)
@@ -67,7 +65,7 @@ def estimate_trade_cost(
         spread_cost_pct = get_spread_cost_fallback()
     n_legs = n_long + n_short
     spread  = spread_cost_pct * n_legs * 2
-    finance = (long_rate * n_long + short_rate * n_short) / 365 * avg_holding_days  # legacy sign
+    finance = (long_rate * n_long - short_rate * n_short) / 365 * avg_holding_days
     return spread + finance
 
 
