@@ -479,6 +479,12 @@ def run_exhaustive_search(
 
     if display_names is None:
         display_names = {i: i for i in instruments}
+    else:
+        # Flatten nested instrument dicts (Sprint 1 asset_configs structure)
+        display_names = {
+            k: (v['display'] if isinstance(v, dict) else v)
+            for k, v in display_names.items()
+        }
 
     T, N = scaled.shape
 
