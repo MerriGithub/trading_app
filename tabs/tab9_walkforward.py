@@ -10,7 +10,7 @@ from tabs.shared import _CACHE_DIR, _tbl
 
 
 def render() -> None:
-    st.header("Walk-Forward Validation")
+    st.header("Trade Validation")
     st.caption(
         "Tests whether the selected scoring mode predicts out-of-sample performance. "
         "Reproduces the Q11 protocol: score all 1v1 pairs on IS data, evaluate OOS, "

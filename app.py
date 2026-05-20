@@ -37,7 +37,7 @@ _live_label = f"⏱ Live 🔔 {_n_alerts}" if _n_alerts > 0 else "⏱ Live"
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 _t1, _t2, _t3, _t4, _t5, _t6, _t7, _t8, _t9, _t10, _t11 = st.tabs([
     "📊 Monitor", "📈 Pair Analysis", "🧮 Stake Calc", "🗂 Portfolio",
-    "🔍 Search", _live_label, "📓 Journal", "🔬 Backtest", "🔄 Walk-Forward",
+    "🔍 Search", _live_label, "📓 Journal", "🔬 Backtest", "🔄 Trade Validation",
     "🔭 Scenario", "📐 Walk-Forward Analysis",
 ])
 
