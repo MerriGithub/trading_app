@@ -54,9 +54,14 @@ def _portfolio() -> Portfolio:
     return Portfolio(_POSITIONS, _ACCOUNT)
 
 
+@st.cache_resource
+def _load_account() -> dict:
+    return load_account()
+
+
 registry  = _registry()
 portfolio = _portfolio()
-account   = load_account()
+account   = _load_account()
 
 
 # ── Multi-asset instrument lookup (used by Tabs 2, 3, 7) ──────────────────────
@@ -132,6 +137,96 @@ def _check_signal_alerts(portfolio: Portfolio, registry: DataRegistry) -> list[d
     return alerts
 
 
+# ── Cached wrappers — avoid re-reading CSVs on every Streamlit rerun ─────────
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_daily_prices(instruments: tuple[str, ...]) -> pd.DataFrame:
+    return registry.get_daily_prices(list(instruments))
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_latest_prices(instruments: tuple[str, ...]) -> dict[str, float]:
+    return registry.get_latest_prices(list(instruments))
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_pair_signal(
+    instruments: tuple[str, ...],
+    long_legs: tuple[str, ...],
+    short_legs: tuple[str, ...],
+    vol_window: int,
+    xing_sd: float,
+    exit_sd: float,
+) -> dict:
+    prices = registry.get_daily_prices(list(instruments))
+    b   = Basket(long_legs=list(long_legs), short_legs=list(short_legs))
+    sig = SpreadSignal(basket=b, prices=prices,
+                       vol_window=vol_window, xing_sd=xing_sd, exit_sd=exit_sd)
+    hist = sig.signal_history(n_days=524)
+    return {
+        'current_sd':    sig.current_sd,
+        'signal_state':  sig.signal_state,
+        'velocity':      float(sig.velocity.iloc[-1]) if len(sig.velocity) else 0.0,
+        'tvr':           sig.tvr,
+        'hist_index':    hist.index,
+        'cum_spread':    hist['cum_spread'],
+        'distance_sd':   hist['distance_sd'],
+    }
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _pair_backtest(
+    long_legs: tuple[str, ...],
+    short_legs: tuple[str, ...],
+    vol_window: int,
+    xing_sd: float,
+    exit_sd: float,
+) -> dict:
+    from engine.backtest import prepare_returns, run_backtest
+    instr  = list(long_legs) + list(short_legs)
+    prices = _cached_daily_prices(tuple(instr))
+    scaled, day_ints, _ = prepare_returns(prices, instr, vol_window=vol_window)
+    n_long, n_short = len(long_legs), len(short_legs)
+    long_mask  = np.array([1.0 / n_long  if i < n_long  else 0.0 for i in range(len(instr))])
+    short_mask = np.array([1.0 / n_short if i >= n_long else 0.0 for i in range(len(instr))])
+    spread_ret = scaled @ (long_mask - short_mask)
+    bt = run_backtest(spread_ret, day_ints,
+                      vol_window=vol_window, xing_sd=xing_sd, exit_sd=exit_sd,
+                      n_legs=n_long + n_short)
+    return {
+        'n_trades':    int(bt['n_trades']),
+        'gross_wr':    float(bt.get('gross_wr', 0.0)),
+        'net_wr':      float(bt.get('net_wr', 0.0)),
+        'avg_gross':   float(bt.get('avg_gross', 0.0)),
+        'avg_net':     float(bt.get('avg_net', 0.0)),
+        'avg_holding': float(bt.get('avg_holding', 0.0)),
+    }
+
+
+def _build_signal_metrics(pos) -> dict:
+    """Compute SpreadSignal metrics for one position. Cached in session_state."""
+    ph  = _cached_daily_prices(tuple(pos.basket.all_instruments))
+    sig = SpreadSignal(basket=pos.basket, prices=ph)
+    return {
+        'current_sd':   sig.current_sd,
+        'signal_state': sig.signal_state,
+        'velocity':     float(sig.velocity.iloc[-1]) if len(sig.velocity) else 0.0,
+        'tvr':          sig.tvr,
+        'distance_sd':  sig.distance_sd,
+        'spread_ret':   sig.spread_ret,
+        'cum_spread':   sig.cum_spread,
+    }
+
+
+def _get_signal_metrics(pos) -> dict | None:
+    cache = st.session_state.setdefault('signal_metrics', {})
+    if pos.id not in cache:
+        try:
+            cache[pos.id] = _build_signal_metrics(pos)
+        except Exception as e:
+            cache[pos.id] = {'error': str(e)}
+    return cache[pos.id]
+
+
 # ── Alert pre-computation (once per page load) ────────────────────────────────
 if 'signal_alerts' not in st.session_state:
     st.session_state['signal_alerts'] = _check_signal_alerts(portfolio, registry)
@@ -162,7 +257,7 @@ with tab7:
         for pos in portfolio.open_positions:
             with st.container(border=True):
                 try:
-                    current_prices = registry.get_latest_prices(pos.basket.all_instruments)
+                    current_prices = _cached_latest_prices(tuple(pos.basket.all_instruments))
                 except Exception as e:
                     st.warning(f"Could not load prices for {pos.name}: {e}")
                     current_prices = pos.entry_prices
@@ -277,7 +372,7 @@ with tab7:
                 key=f"leg_buy_{i}",
             )
             try:
-                buy_default = float(registry.get_latest_prices([buy_inst]).get(buy_inst, 0.0))
+                buy_default = float(_cached_latest_prices((buy_inst,)).get(buy_inst, 0.0))
             except Exception:
                 buy_default = 0.0
             buy_price = lcols[1].number_input(
@@ -293,7 +388,7 @@ with tab7:
                 key=f"leg_sell_{i}",
             )
             try:
-                sell_default = float(registry.get_latest_prices([sell_inst]).get(sell_inst, 0.0))
+                sell_default = float(_cached_latest_prices((sell_inst,)).get(sell_inst, 0.0))
             except Exception:
                 sell_default = 0.0
             sell_price = lcols[4].number_input(
@@ -401,16 +496,9 @@ with tab1:
     else:
         for pos in portfolio.open_positions:
             with st.container(border=True):
-                try:
-                    cp = registry.get_latest_prices(pos.basket.all_instruments)
-                    prices_hist = registry.get_daily_prices(pos.basket.all_instruments)
-                    signal = SpreadSignal(basket=pos.basket, prices=prices_hist)
-                    sig_ok = True
-                except Exception as e:
-                    st.warning(f"Could not build signal for {pos.name}: {e}")
-                    cp = pos.entry_prices
-                    sig_ok = False
-                    signal = None
+                cp    = _cached_latest_prices(tuple(pos.basket.all_instruments))
+                sm    = _get_signal_metrics(pos)
+                sig_ok = sm is not None and 'error' not in sm
 
                 hc1, hc2, hc3 = st.columns([3, 2, 2])
                 hc1.markdown(f"### {pos.name}")
@@ -421,18 +509,20 @@ with tab1:
                 hc2.metric("Opened", str(pos.entry_date))
                 hc3.metric("Days held", pos.days_held)
 
+                if not sig_ok:
+                    st.warning(f"Could not build signal for {pos.name}: {sm.get('error') if sm else 'unknown'}")
+
                 if sig_ok:
-                    sd = signal.current_sd
+                    sd = sm['current_sd']
                     sd_clamped = max(-3.0, min(3.0, sd))
                     progress_val = (sd_clamped + 3.0) / 6.0
                     sc1, sc2, sc3 = st.columns([2, 2, 2])
                     sc1.metric("Signal", f"{sd:+.2f} SD")
                     sc1.progress(progress_val)
-                    velocity = float(signal.velocity.iloc[-1]) if len(signal.velocity) else 0.0
-                    sc2.metric("Velocity", f"{velocity:+.4f}")
-                    sc2.metric("TVR", f"{signal.tvr:.3f}")
-                    sc3.markdown(f"**{_signal_state_badge(signal.signal_state)}**")
-                    sc3.caption(f"State: `{signal.signal_state}`")
+                    sc2.metric("Velocity", f"{sm['velocity']:+.4f}")
+                    sc2.metric("TVR", f"{sm['tvr']:.3f}")
+                    sc3.markdown(f"**{_signal_state_badge(sm['signal_state'])}**")
+                    sc3.caption(f"State: `{sm['signal_state']}`")
 
                 pc1, pc2, pc3 = st.columns(3)
                 pc1.metric("Unrealised", f"£{pos.live_pnl(cp):+,.0f}")
@@ -494,26 +584,22 @@ with tab2:
 
     if basket is not None:
         try:
-            prices_hist = registry.get_daily_prices(basket.all_instruments,
-                                                    start_date='1999-01-01')
-            signal = SpreadSignal(
-                basket=basket, prices=prices_hist,
-                vol_window=int(vol_window),
-                xing_sd=float(xing_sd),
-                exit_sd=float(exit_sd),
+            pa_sig = _cached_pair_signal(
+                tuple(basket.all_instruments),
+                tuple(basket.long_legs),
+                tuple(basket.short_legs),
+                int(vol_window), float(xing_sd), float(exit_sd),
             )
 
             # Metrics row
             mc1, mc2, mc3, mc4 = st.columns(4)
-            mc1.metric("Current SD",  f"{signal.current_sd:+.2f}")
-            mc2.metric("TVR",         f"{signal.tvr:.3f}")
-            velocity = float(signal.velocity.iloc[-1]) if len(signal.velocity) else 0.0
-            mc3.metric("Velocity",    f"{velocity:+.4f}")
-            mc4.markdown(f"**{_signal_state_badge(signal.signal_state)}**")
+            mc1.metric("Current SD",  f"{pa_sig['current_sd']:+.2f}")
+            mc2.metric("TVR",         f"{pa_sig['tvr']:.3f}")
+            mc3.metric("Velocity",    f"{pa_sig['velocity']:+.4f}")
+            mc4.markdown(f"**{_signal_state_badge(pa_sig['signal_state'])}**")
 
             # Spread chart (last 2y)
-            hist = signal.signal_history(n_days=524)
-            cum_spread = hist['cum_spread']
+            cum_spread   = pa_sig['cum_spread']
             rolling_mean = cum_spread.rolling(int(vol_window), min_periods=10).mean()
             rolling_std  = cum_spread.rolling(int(vol_window), min_periods=10).std()
             fig = go.Figure()
@@ -536,46 +622,29 @@ with tab2:
             # Open position details
             if open_pos is not None:
                 st.subheader("Position detail")
-                cp = registry.get_latest_prices(open_pos.basket.all_instruments)
+                cp = _cached_latest_prices(tuple(open_pos.basket.all_instruments))
                 pc1, pc2, pc3, pc4 = st.columns(4)
                 pc1.metric("Opened", str(open_pos.entry_date))
                 pc2.metric("Days held", open_pos.days_held)
                 pc3.metric("Unrealised", f"£{open_pos.live_pnl(cp):+,.0f}")
                 pc4.metric("Net P&L", f"£{open_pos.net_pnl(cp):+,.0f}")
 
-            # Backtest summary (cached)
-            @st.cache_data(show_spinner=False)
-            def _pair_backtest(long_legs: tuple, short_legs: tuple,
-                               vol_window: int, xing_sd: float, exit_sd: float) -> dict:
-                from engine.backtest import prepare_returns, run_backtest
-                instr = list(long_legs) + list(short_legs)
-                prices = registry.get_daily_prices(instr)
-                scaled, day_ints, idx = prepare_returns(prices, instr, vol_window=vol_window)
-                n_long, n_short = len(long_legs), len(short_legs)
-                long_mask  = np.array([1.0 / n_long  if i < n_long else 0.0
-                                       for i in range(len(instr))])
-                short_mask = np.array([1.0 / n_short if i >= n_long else 0.0
-                                       for i in range(len(instr))])
-                spread_ret = scaled @ (long_mask - short_mask)
-                bt = run_backtest(spread_ret, day_ints,
-                                  vol_window=vol_window,
-                                  xing_sd=xing_sd, exit_sd=exit_sd,
-                                  n_legs=n_long + n_short)
-                return {
-                    'n_trades':     int(bt['n_trades']),
-                    'gross_wr':     float(bt.get('gross_wr', 0.0)),
-                    'net_wr':       float(bt.get('net_wr', 0.0)),
-                    'avg_gross':    float(bt.get('avg_gross', 0.0)),
-                    'avg_net':      float(bt.get('avg_net', 0.0)),
-                    'avg_holding':  float(bt.get('avg_holding', 0.0)),
-                }
 
-            with st.expander("Backtest summary", expanded=False):
+            _bt_pair_key = (tuple(basket.long_legs), tuple(basket.short_legs))
+            if st.session_state.get('tab2_bt_pair_key') != _bt_pair_key:
+                st.session_state.pop('tab2_backtest_result', None)
+            if st.button("Run backtest", key="tab2_run_backtest"):
+                st.session_state['tab2_bt_pair_key'] = _bt_pair_key
                 try:
-                    bt = _pair_backtest(
+                    st.session_state['tab2_backtest_result'] = _pair_backtest(
                         tuple(basket.long_legs), tuple(basket.short_legs),
                         int(vol_window), float(xing_sd), float(exit_sd),
                     )
+                except Exception as e:
+                    st.warning(f"Backtest unavailable: {e}")
+            if 'tab2_backtest_result' in st.session_state:
+                with st.expander("Backtest summary", expanded=True):
+                    bt = st.session_state['tab2_backtest_result']
                     bc1, bc2, bc3 = st.columns(3)
                     bc1.metric("Trades", f"{bt['n_trades']:,}")
                     bc1.metric("Avg holding", f"{bt['avg_holding']:.0f}d")
@@ -583,8 +652,6 @@ with tab2:
                     bc2.metric("Avg gross",  f"{bt['avg_gross']:+.4f}")
                     bc3.metric("Net WR",   f"{bt['net_wr']:.1%}")
                     bc3.metric("Avg net",  f"{bt['avg_net']:+.4f}")
-                except Exception as e:
-                    st.warning(f"Backtest unavailable: {e}")
 
         except Exception as e:
             st.error(f"Signal computation failed: {e}")
@@ -674,7 +741,7 @@ with tab4:
         inst for pos in open_positions for inst in pos.basket.all_instruments
     })
     try:
-        current_prices = registry.get_latest_prices(all_open_instruments)
+        current_prices = _cached_latest_prices(tuple(all_open_instruments))
     except Exception:
         current_prices = {}
 
@@ -786,7 +853,7 @@ with tab5:
     st.header("Portfolio Search")
     st.caption("Equity-only. Enumerates long/short combinations across the 12 equity indices.")
 
-    @st.cache_data(show_spinner=False)
+    @st.cache_resource
     def _load_equity_data():
         prices, _ = load_asset_prices(_CACHE_DIR / 'prices.csv')
         rets     = _eq_returns(prices)
@@ -967,6 +1034,10 @@ with tab6:
                 with st.spinner("Refreshing prices…"):
                     registry.refresh(open_insts)
                 st.session_state['signal_alerts'] = _check_signal_alerts(portfolio, registry)
+                st.session_state.pop('tab6_intraday', None)
+                st.session_state.pop('signal_metrics', None)
+                _cached_daily_prices.clear()
+                _cached_latest_prices.clear()
                 st.success("Prices updated.")
 
     with col_last:
@@ -1017,10 +1088,18 @@ with tab6:
     else:
         st.subheader("Open Positions — Live")
 
+        if 'tab6_intraday' not in st.session_state:
+            _intraday_cache: dict[tuple, object] = {}
+            for _p in portfolio.open_positions:
+                _key = tuple(sorted(_p.basket.all_instruments))
+                _intraday_cache[_key] = registry.get_intraday(list(_key), interval='5m')
+            st.session_state['tab6_intraday'] = _intraday_cache
+
         for _pos in portfolio.open_positions:
             _insts = _pos.basket.all_instruments
-            _daily_prices = registry.get_latest_prices(_insts)
-            _intraday_df  = registry.get_intraday(_insts, interval='5m')
+            _daily_prices = _cached_latest_prices(tuple(_insts))
+            _intraday_key = tuple(sorted(_insts))
+            _intraday_df  = st.session_state['tab6_intraday'].get(_intraday_key)
 
             with st.expander(
                 f"**{_pos.name}** — {' × '.join(ALL_DISPLAY.get(i, i) for i in _insts)}",
@@ -1030,11 +1109,10 @@ with tab6:
 
                 with col_signal:
                     st.markdown("**Signal**")
-                    try:
-                        _ph = registry.get_daily_prices(_insts)
-                        _sig = SpreadSignal(basket=_pos.basket, prices=_ph)
-                        _sd    = _sig.current_sd
-                        _state = _sig.signal_state
+                    _sm = _get_signal_metrics(_pos)
+                    if _sm and 'error' not in _sm:
+                        _sd    = _sm['current_sd']
+                        _state = _sm['signal_state']
                         st.metric("SD distance", f"{_sd:+.3f}")
                         st.caption({
                             'EXIT':        '🟢 Near exit target',
@@ -1044,8 +1122,8 @@ with tab6:
                         }.get(_state, _state))
                         _norm = min(max((_sd + 3) / 6, 0.0), 1.0)
                         st.progress(_norm)
-                    except Exception as _e:
-                        st.caption(f"Signal unavailable: {_e}")
+                    else:
+                        st.caption(f"Signal unavailable: {_sm.get('error') if _sm else 'unknown'}")
 
                 with col_prices:
                     st.markdown("**Latest Prices (EOD)**")
@@ -1096,7 +1174,7 @@ with tab6:
         for inst in pos.basket.all_instruments
     })
     if _all_open_insts:
-        _latest = registry.get_latest_prices(_all_open_insts)
+        _latest = _cached_latest_prices(tuple(_all_open_insts))
         _overview = [
             {
                 'Instrument': ALL_DISPLAY.get(inst, inst),
@@ -1159,16 +1237,16 @@ with tab8:
         bk1, bk2, bk3, bk4 = st.columns(4)
         with bk1:
             st.markdown("**Long legs**")
-            bt_min_long = st.number_input("Min", 2, 6, 3, key='bt_min_long')
-            bt_max_long = st.number_input("Max", 2, 6, 3, key='bt_max_long')
+            bt_min_long = st.number_input("Min", 1, 6, 3, key='bt_min_long')
+            bt_max_long = st.number_input("Max", 1, 6, 3, key='bt_max_long')
         with bk2:
             st.markdown("**Short legs**")
             bt_symmetric = st.checkbox("Same as long", value=True, key='bt_symmetric')
             if bt_symmetric:
                 bt_min_short, bt_max_short = int(bt_min_long), int(bt_max_long)
             else:
-                bt_min_short = st.number_input("Min", 2, 6, 3, key='bt_min_short')
-                bt_max_short = st.number_input("Max", 2, 6, 3, key='bt_max_short')
+                bt_min_short = st.number_input("Min", 1, 6, 3, key='bt_min_short')
+                bt_max_short = st.number_input("Max", 1, 6, 3, key='bt_max_short')
         with bk3:
             bt_sample = st.number_input(
                 "Sample size (0 = exhaustive)", 0, 50000, 2000, key='bt_sample',
@@ -1311,123 +1389,120 @@ with tab8:
             key='bt_ca_short_class',
         )
 
-        if _long_class == _short_class:
-            st.warning("Long and short classes are the same — switch to Intra-asset mode.")
-        else:
-            with st.expander("Signal parameters", expanded=True):
-                cc1, cc2, cc3, cc4 = st.columns(4)
-                _ca_vol  = cc1.number_input("Vol window", 50, 500, 262, key='bt_ca_vol')
-                _ca_xing = cc2.number_input("Entry SD", 0.5, 5.0, 2.0, 0.5, key='bt_ca_xing')
-                _ca_exit = cc3.number_input("Exit SD", 0.0, 2.0, 1.0, 0.5, key='bt_ca_exit')
-                _long_cfg = ASSET_CLASSES[_long_class]
-                _ca_fin   = cc4.number_input(
-                    "Financing %pa", 0.0, 10.0,
-                    _long_cfg['financing']['long_rate'] * 100, 0.1, key='bt_ca_fin',
-                )
+        with st.expander("Signal parameters", expanded=True):
+            cc1, cc2, cc3, cc4 = st.columns(4)
+            _ca_vol  = cc1.number_input("Vol window", 50, 500, 262, key='bt_ca_vol')
+            _ca_xing = cc2.number_input("Entry SD", 0.5, 5.0, 2.0, 0.5, key='bt_ca_xing')
+            _ca_exit = cc3.number_input("Exit SD", 0.0, 2.0, 1.0, 0.5, key='bt_ca_exit')
+            _long_cfg = ASSET_CLASSES[_long_class]
+            _ca_fin   = cc4.number_input(
+                "Financing %pa", 0.0, 10.0,
+                _long_cfg['financing']['long_rate'] * 100, 0.1, key='bt_ca_fin',
+            )
 
-            with st.expander("Basket configuration", expanded=True):
-                bc1, bc2, bc3, bc4 = st.columns(4)
-                _ca_nl_min = bc1.number_input("Min long legs",  1, 4, 1, key='bt_ca_nl_min')
-                _ca_nl_max = bc2.number_input("Max long legs",  1, 4, 1, key='bt_ca_nl_max')
-                _ca_ns_min = bc3.number_input("Min short legs", 1, 4, 1, key='bt_ca_ns_min')
-                _ca_ns_max = bc4.number_input("Max short legs", 1, 4, 1, key='bt_ca_ns_max')
-                _ca_top_n  = st.number_input("Top N results", 10, 200, 50, key='bt_ca_top_n')
-                _ca_sample = st.number_input(
-                    "Sample size (0 = exhaustive)", 0, 20000, 0, key='bt_ca_sample',
-                )
-                _ca_scoring = st.selectbox(
-                    "Scoring mode", list(SCORING_MODES.keys()),
-                    format_func=lambda x: SCORING_MODES[x], key='bt_ca_scoring',
-                )
+        with st.expander("Basket configuration", expanded=True):
+            bc1, bc2, bc3, bc4 = st.columns(4)
+            _ca_nl_min = bc1.number_input("Min long legs",  1, 4, 1, key='bt_ca_nl_min')
+            _ca_nl_max = bc2.number_input("Max long legs",  1, 4, 1, key='bt_ca_nl_max')
+            _ca_ns_min = bc3.number_input("Min short legs", 1, 4, 1, key='bt_ca_ns_min')
+            _ca_ns_max = bc4.number_input("Max short legs", 1, 4, 1, key='bt_ca_ns_max')
+            _ca_top_n  = st.number_input("Top N results", 10, 200, 50, key='bt_ca_top_n')
+            _ca_sample = st.number_input(
+                "Sample size (0 = exhaustive)", 0, 20000, 0, key='bt_ca_sample',
+            )
+            _ca_scoring = st.selectbox(
+                "Scoring mode", list(SCORING_MODES.keys()),
+                format_func=lambda x: SCORING_MODES[x], key='bt_ca_scoring',
+            )
 
-            st.markdown("---")
-            _ca_run = st.button("▶ Run cross-asset search", type="primary",
-                                use_container_width=True, key='bt_ca_run')
+        st.markdown("---")
+        _ca_run = st.button("▶ Run cross-asset search", type="primary",
+                            use_container_width=True, key='bt_ca_run')
 
-            if _ca_run:
-                try:
-                    with st.spinner(f"Loading {_long_class}/{_short_class} prices..."):
-                        _ca_prices, _ca_long_i, _ca_short_i, _ = load_cross_asset_prices(
-                            _long_class, _short_class, _CACHE_DIR,
-                        )
-                    st.info(
-                        f"Loaded {len(_ca_long_i)} {_long_class} + "
-                        f"{len(_ca_short_i)} {_short_class} instruments. "
-                        f"Common trading days: {len(_ca_prices):,} "
-                        f"({_ca_prices.index[0].date()} – {_ca_prices.index[-1].date()})"
+        if _ca_run:
+            try:
+                with st.spinner(f"Loading {_long_class}/{_short_class} prices..."):
+                    _ca_prices, _ca_long_i, _ca_short_i, _ = load_cross_asset_prices(
+                        _long_class, _short_class, _CACHE_DIR,
                     )
+                st.info(
+                    f"Loaded {len(_ca_long_i)} {_long_class} + "
+                    f"{len(_ca_short_i)} {_short_class} instruments. "
+                    f"Common trading days: {len(_ca_prices):,} "
+                    f"({_ca_prices.index[0].date()} – {_ca_prices.index[-1].date()})"
+                )
 
-                    with st.spinner("Preparing vol-scaled returns..."):
-                        _ca_long_sc, _ca_short_sc, _ca_day_ints, _ca_idx = prepare_returns_aligned(
-                            _ca_prices, _ca_long_i, _ca_short_i, vol_window=int(_ca_vol),
-                        )
-                    _ca_all_instr  = _ca_long_i + _ca_short_i
-                    _ca_all_scaled = np.concatenate([_ca_long_sc, _ca_short_sc], axis=1)
-                    _ca_latest = _ca_prices.iloc[-1].to_dict()
-                    _ca_lookup = {
-                        **get_spread_cost_lookup(_ca_long_i,  _ca_latest, _long_class),
-                        **get_spread_cost_lookup(_ca_short_i, _ca_latest, _short_class),
-                    }
-                    _ca_fin_daily = (_ca_fin / 100) / 365
+                with st.spinner("Preparing vol-scaled returns..."):
+                    _ca_long_sc, _ca_short_sc, _ca_day_ints, _ca_idx = prepare_returns_aligned(
+                        _ca_prices, _ca_long_i, _ca_short_i, vol_window=int(_ca_vol),
+                    )
+                _ca_all_instr  = _ca_long_i + _ca_short_i
+                _ca_all_scaled = np.concatenate([_ca_long_sc, _ca_short_sc], axis=1)
+                _ca_latest = _ca_prices.iloc[-1].to_dict()
+                _ca_lookup = {
+                    **get_spread_cost_lookup(_ca_long_i,  _ca_latest, _long_class),
+                    **get_spread_cost_lookup(_ca_short_i, _ca_latest, _short_class),
+                }
+                _ca_fin_daily = (_ca_fin / 100) / 365
 
-                    _ca_prog = st.progress(0.0, text="Searching...")
-                    with st.spinner("Running cross-asset search..."):
-                        _ca_df = run_exhaustive_search(
-                            _ca_all_scaled, _ca_day_ints, _ca_all_instr,
-                            long_instrument_subset=_ca_long_i,
-                            short_instrument_subset=_ca_short_i,
-                            min_long_legs=int(_ca_nl_min), max_long_legs=int(_ca_nl_max),
-                            min_short_legs=int(_ca_ns_min), max_short_legs=int(_ca_ns_max),
-                            vol_window=int(_ca_vol),
-                            xing_sd=float(_ca_xing), exit_sd=float(_ca_exit),
-                            spread_cost_lookup=_ca_lookup,
-                            financing_daily_pct=_ca_fin_daily,
-                            top_n=int(_ca_top_n), sample_n=int(_ca_sample),
-                            scoring_mode=_ca_scoring,
-                            progress_cb=lambda p: _ca_prog.progress(p, text=f"Searching... {p:.0%}"),
-                        )
-                    _ca_prog.progress(1.0, text="Done")
+                _ca_prog = st.progress(0.0, text="Searching...")
+                with st.spinner("Running cross-asset search..."):
+                    _ca_df = run_exhaustive_search(
+                        _ca_all_scaled, _ca_day_ints, _ca_all_instr,
+                        long_instrument_subset=_ca_long_i,
+                        short_instrument_subset=_ca_short_i,
+                        min_long_legs=int(_ca_nl_min), max_long_legs=int(_ca_nl_max),
+                        min_short_legs=int(_ca_ns_min), max_short_legs=int(_ca_ns_max),
+                        vol_window=int(_ca_vol),
+                        xing_sd=float(_ca_xing), exit_sd=float(_ca_exit),
+                        spread_cost_lookup=_ca_lookup,
+                        financing_daily_pct=_ca_fin_daily,
+                        top_n=int(_ca_top_n), sample_n=int(_ca_sample),
+                        scoring_mode=_ca_scoring,
+                        progress_cb=lambda p: _ca_prog.progress(p, text=f"Searching... {p:.0%}"),
+                    )
+                _ca_prog.progress(1.0, text="Done")
 
-                    if _ca_df.empty:
-                        st.warning("No results found.")
-                    else:
-                        _ca_net_pos = (_ca_df['NetExpectancy'] > 0).sum()
-                        cm1, cm2, cm3, cm4 = st.columns(4)
-                        cm1.metric("Results",   len(_ca_df))
-                        cm2.metric("Net+ pairs", f"{_ca_net_pos} ({_ca_net_pos/len(_ca_df):.0%})")
-                        cm3.metric("Best net expectancy",
-                                   f"{_ca_df['NetExpectancy'].max()*100:+.2f}%")
-                        cm4.metric("Avg holding (top 10)",
-                                   f"{_ca_df.head(10)['AvgHolding'].mean():.0f}d")
+                if _ca_df.empty:
+                    st.warning("No results found.")
+                else:
+                    _ca_net_pos = (_ca_df['NetExpectancy'] > 0).sum()
+                    cm1, cm2, cm3, cm4 = st.columns(4)
+                    cm1.metric("Results",   len(_ca_df))
+                    cm2.metric("Net+ pairs", f"{_ca_net_pos} ({_ca_net_pos/len(_ca_df):.0%})")
+                    cm3.metric("Best net expectancy",
+                               f"{_ca_df['NetExpectancy'].max()*100:+.2f}%")
+                    cm4.metric("Avg holding (top 10)",
+                               f"{_ca_df.head(10)['AvgHolding'].mean():.0f}d")
 
-                        st.subheader(
-                            f"Results — {_long_class.title()} vs {_short_class.title()}"
-                        )
-                        _ca_disp = _ca_df.drop(
-                            columns=[c for c in _ca_df.columns if c.startswith('_')],
-                            errors='ignore',
-                        ).copy()
-                        _pct = {'WinRate', 'Expectancy', 'NetExpectancy', 'SpreadCost', 'FinCost'}
-                        for _c in _ca_disp.columns:
-                            if _c in ('Config', 'Long', 'Short'):
-                                continue
-                            elif _c in _pct:
-                                _ca_disp[_c] = _ca_disp[_c].map('{:.1%}'.format)
-                            elif _c == 'AvgHolding':
-                                _ca_disp[_c] = _ca_disp[_c].map(lambda v: f'{v:.0f}d')
-                            elif _c == 'Trades':
-                                _ca_disp[_c] = _ca_disp[_c].map('{:.0f}'.format)
-                            else:
-                                _ca_disp[_c] = _ca_disp[_c].map('{:.3f}'.format)
-                        _tbl(_ca_disp, show_index=True)
+                    st.subheader(
+                        f"Results — {_long_class.title()} vs {_short_class.title()}"
+                    )
+                    _ca_disp = _ca_df.drop(
+                        columns=[c for c in _ca_df.columns if c.startswith('_')],
+                        errors='ignore',
+                    ).copy()
+                    _pct = {'WinRate', 'Expectancy', 'NetExpectancy', 'SpreadCost', 'FinCost'}
+                    for _c in _ca_disp.columns:
+                        if _c in ('Config', 'Long', 'Short'):
+                            continue
+                        elif _c in _pct:
+                            _ca_disp[_c] = _ca_disp[_c].map('{:.1%}'.format)
+                        elif _c == 'AvgHolding':
+                            _ca_disp[_c] = _ca_disp[_c].map(lambda v: f'{v:.0f}d')
+                        elif _c == 'Trades':
+                            _ca_disp[_c] = _ca_disp[_c].map('{:.0f}'.format)
+                        else:
+                            _ca_disp[_c] = _ca_disp[_c].map('{:.3f}'.format)
+                    _tbl(_ca_disp, show_index=True)
 
-                except FileNotFoundError as e:
-                    st.error(str(e))
-                except ValueError as e:
-                    st.error(str(e))
-                except Exception as e:
-                    st.error(f"Unexpected error: {e}")
-                    raise
+            except FileNotFoundError as e:
+                st.error(str(e))
+            except ValueError as e:
+                st.error(str(e))
+            except Exception as e:
+                st.error(f"Unexpected error: {e}")
+                raise
 
 
 # ════════════════════════════════════════════════════════════════════════════
