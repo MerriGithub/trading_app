@@ -161,7 +161,7 @@ def _cached_pair_signal(
     b   = Basket(long_legs=list(long_legs), short_legs=list(short_legs))
     sig = SpreadSignal(basket=b, prices=prices,
                        vol_window=vol_window, xing_sd=xing_sd, exit_sd=exit_sd)
-    hist = sig.signal_history(n_days=524)
+    hist = sig.signal_history(n_days=9999)
     return {
         'current_sd':    sig.current_sd,
         'signal_state':  sig.signal_state,
@@ -180,11 +180,13 @@ def _pair_backtest(
     vol_window: int,
     xing_sd: float,
     exit_sd: float,
+    window_days: int | None = None,
 ) -> dict:
     from engine.backtest import prepare_returns, run_backtest
     instr  = list(long_legs) + list(short_legs)
     prices = _cached_daily_prices(tuple(instr))
-    scaled, day_ints, _ = prepare_returns(prices, instr, vol_window=vol_window)
+    scaled, day_ints, index = prepare_returns(prices, instr, vol_window=vol_window,
+                                              window_days=window_days)
     n_long, n_short = len(long_legs), len(short_legs)
     long_mask  = np.array([1.0 / n_long  if i < n_long  else 0.0 for i in range(len(instr))])
     short_mask = np.array([1.0 / n_short if i >= n_long else 0.0 for i in range(len(instr))])
@@ -192,13 +194,19 @@ def _pair_backtest(
     bt = run_backtest(spread_ret, day_ints,
                       vol_window=vol_window, xing_sd=xing_sd, exit_sd=exit_sd,
                       n_legs=n_long + n_short)
+    s = bt['summary']
+    n = int(bt['n_trades'])
     return {
-        'n_trades':    int(bt['n_trades']),
-        'gross_wr':    float(bt.get('gross_wr', 0.0)),
-        'net_wr':      float(bt.get('net_wr', 0.0)),
-        'avg_gross':   float(bt.get('avg_gross', 0.0)),
-        'avg_net':     float(bt.get('avg_net', 0.0)),
-        'avg_holding': float(bt.get('avg_holding', 0.0)),
+        'n_trades':    n,
+        'gross_wr':    float(s.get('gross_wr', 0.0)),
+        'net_wr':      float(s.get('net_wr', 0.0)),
+        'avg_gross':   float(s.get('avg_gross', 0.0)),
+        'avg_net':     float(s.get('avg_net', 0.0)),
+        'avg_holding': float(s.get('avg_holding', 0.0)),
+        # Raw data for post-hoc trend alignment analysis
+        'trades_raw':  bt['trades_raw'][:n].copy(),
+        'cum_spread':  np.cumsum(spread_ret),
+        'date_index':  index,
     }
 
 
@@ -235,9 +243,10 @@ _n_alerts = len(st.session_state['signal_alerts'])
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 _live_label = f"⏱ Live 🔔 {_n_alerts}" if _n_alerts > 0 else "⏱ Live"
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "📊 Monitor", "📈 Pair Analysis", "🧮 Stake Calc", "🗂 Portfolio",
     "🔍 Search", _live_label, "📓 Journal", "🔬 Backtest", "🔄 Walk-Forward",
+    "🔭 Scenario",
 ])
 
 
@@ -577,10 +586,15 @@ with tab2:
                 open_pos = p
                 break
 
-    cp1, cp2, cp3 = st.columns(3)
-    vol_window = cp1.slider("Vol window (days)", 130, 524, 262, 10, key="pa_vol")
-    xing_sd    = cp2.slider("Entry SD", 1.0, 3.0, 2.0, 0.1, key="pa_xing")
-    exit_sd    = cp3.slider("Exit SD",  0.0, 1.5, 1.0, 0.1, key="pa_exit")
+    cp1, cp2, cp3, cp4, cp5 = st.columns(5)
+    vol_window      = cp1.slider("Vol window (days)", 50, 524, 262, 10, key="pa_vol")
+    xing_sd         = cp2.slider("Entry SD", 1.0, 3.0, 2.0, 0.1, key="pa_xing")
+    exit_sd         = cp3.slider("Exit SD",  0.0, 1.5, 1.0, 0.1, key="pa_exit")
+    pa_trend_window = cp4.slider("Trend filter (days)", 130, 756, 262, 1, key="pa_trend_window")
+    _pa_window_opts = {'1 year': 262, '2 years': 524, '3 years': 786, '5 years': 1310, 'All': 0}
+    pa_window_label = cp5.selectbox("History window", list(_pa_window_opts.keys()),
+                                    index=4, key="pa_window")
+    pa_hist_days = _pa_window_opts[pa_window_label] or None
 
     if basket is not None:
         try:
@@ -598,11 +612,39 @@ with tab2:
             mc3.metric("Velocity",    f"{pa_sig['velocity']:+.4f}")
             mc4.markdown(f"**{_signal_state_badge(pa_sig['signal_state'])}**")
 
-            # Spread chart (last 2y)
-            cum_spread   = pa_sig['cum_spread']
-            rolling_mean = cum_spread.rolling(int(vol_window), min_periods=10).mean()
-            rolling_std  = cum_spread.rolling(int(vol_window), min_periods=10).std()
+            # Spread chart — compute rolling stats on full history, then slice for display
+            _cs_full   = pa_sig['cum_spread']
+            _rm_full   = _cs_full.rolling(int(vol_window), min_periods=10).mean()
+            _rstd_full = _cs_full.rolling(int(vol_window), min_periods=10).std()
+
+            # Trend filter computation on full history
+            _trend_win  = int(pa_trend_window)
+            _trend_full = _cs_full.rolling(_trend_win, min_periods=10).mean()
+            _slope_lb   = min(20, _trend_win // 10)
+            _trend_valid = _trend_full.dropna()
+            if len(_trend_valid) >= _slope_lb + 1:
+                _trend_slope = (float(_trend_valid.iloc[-1]) - float(_trend_valid.iloc[-_slope_lb - 1])) / _slope_lb
+            else:
+                _trend_slope = 0.0
+
+            if pa_hist_days is not None:
+                _cutoff      = _cs_full.index[-1] - pd.Timedelta(days=pa_hist_days)
+                cum_spread   = _cs_full[_cs_full.index >= _cutoff]
+                rolling_mean = _rm_full[_rm_full.index >= _cutoff]
+                rolling_std  = _rstd_full[_rstd_full.index >= _cutoff]
+                trend_mean   = _trend_full[_trend_full.index >= _cutoff]
+            else:
+                cum_spread, rolling_mean, rolling_std = _cs_full, _rm_full, _rstd_full
+                trend_mean = _trend_full
+
             fig = go.Figure()
+            # Background shading by trend direction
+            if abs(_trend_slope) >= 0.0001:
+                _shade = 'rgba(0,180,0,0.08)' if _trend_slope > 0 else 'rgba(200,0,0,0.08)'
+                fig.add_shape(type='rect',
+                              xref='x domain', yref='y domain',
+                              x0=0, x1=1, y0=0, y1=1,
+                              fillcolor=_shade, line_width=0, layer='below')
             fig.add_trace(go.Scatter(x=cum_spread.index, y=cum_spread,
                                      name='Cumulative spread', line=dict(color='#2c6fad')))
             fig.add_trace(go.Scatter(x=rolling_mean.index, y=rolling_mean,
@@ -615,9 +657,32 @@ with tab2:
                                      y=rolling_mean - float(xing_sd) * rolling_std,
                                      name=f'-{xing_sd} SD',
                                      line=dict(color='green', dash='dot')))
+            fig.add_trace(go.Scatter(x=trend_mean.index, y=trend_mean,
+                                     name=f'Trend mean ({_trend_win}d)',
+                                     line=dict(color='orange', dash='dash')))
             fig.update_layout(title="Cumulative spread with ±SD bands",
                               height=400, margin=dict(l=0, r=0, t=40, b=0))
             st.plotly_chart(fig, use_container_width=True)
+
+            # Trend metrics row
+            _trend_dir = ('🟢 Long bias'  if _trend_slope >  0.0001
+                          else '🔴 Short bias' if _trend_slope < -0.0001
+                          else '⚪ Neutral')
+            _cur_sd = pa_sig['current_sd']
+            if abs(_cur_sd) < float(xing_sd):
+                _align_badge = '— No active signal'
+            elif _cur_sd > 0 and _trend_slope < 0:
+                _align_badge = '✅ Aligned'
+            elif _cur_sd > 0 and _trend_slope > 0:
+                _align_badge = '⚠️ Counter-trend'
+            elif _cur_sd < 0 and _trend_slope > 0:
+                _align_badge = '✅ Aligned'
+            else:
+                _align_badge = '⚠️ Counter-trend'
+            tm1, tm2, tm3 = st.columns(3)
+            tm1.metric("Trend direction",  _trend_dir)
+            tm2.metric("Signal alignment", _align_badge)
+            tm3.metric("Trend slope",      f"{_trend_slope:+.4f}")
 
             # Open position details
             if open_pos is not None:
@@ -630,7 +695,8 @@ with tab2:
                 pc4.metric("Net P&L", f"£{open_pos.net_pnl(cp):+,.0f}")
 
 
-            _bt_pair_key = (tuple(basket.long_legs), tuple(basket.short_legs))
+            _bt_pair_key = (tuple(basket.long_legs), tuple(basket.short_legs),
+                            pa_hist_days, int(pa_trend_window))
             if st.session_state.get('tab2_bt_pair_key') != _bt_pair_key:
                 st.session_state.pop('tab2_backtest_result', None)
             if st.button("Run backtest", key="tab2_run_backtest"):
@@ -639,19 +705,47 @@ with tab2:
                     st.session_state['tab2_backtest_result'] = _pair_backtest(
                         tuple(basket.long_legs), tuple(basket.short_legs),
                         int(vol_window), float(xing_sd), float(exit_sd),
+                        pa_hist_days,
                     )
                 except Exception as e:
                     st.warning(f"Backtest unavailable: {e}")
             if 'tab2_backtest_result' in st.session_state:
                 with st.expander("Backtest summary", expanded=True):
                     bt = st.session_state['tab2_backtest_result']
-                    bc1, bc2, bc3 = st.columns(3)
+                    bc1, bc2, bc3, bc4 = st.columns(4)
                     bc1.metric("Trades", f"{bt['n_trades']:,}")
                     bc1.metric("Avg holding", f"{bt['avg_holding']:.0f}d")
                     bc2.metric("Gross WR", f"{bt['gross_wr']:.1%}")
                     bc2.metric("Avg gross",  f"{bt['avg_gross']:+.4f}")
                     bc3.metric("Net WR",   f"{bt['net_wr']:.1%}")
                     bc3.metric("Avg net",  f"{bt['avg_net']:+.4f}")
+
+                    # Post-hoc trend alignment stat
+                    _bt_n = bt.get('n_trades', 0)
+                    _bt_trades = bt.get('trades_raw')
+                    _bt_cum = bt.get('cum_spread')
+                    _bt_idx = bt.get('date_index')
+                    if _bt_n > 0 and _bt_trades is not None and _bt_cum is not None:
+                        from engine.numba_core import COL_ENTRY_IDX as _CEI, COL_SIDE as _CS
+                        _tw = int(pa_trend_window)
+                        _slb2 = min(20, _tw // 10)
+                        _trend_bt = pd.Series(_bt_cum, index=_bt_idx).rolling(_tw, min_periods=10).mean()
+                        _trend_arr = _trend_bt.values
+                        _entry_idxs = _bt_trades[:, _CEI].astype(int)
+                        _sides      = _bt_trades[:, _CS]
+                        _prev_idxs  = np.maximum(0, _entry_idxs - _slb2)
+                        _has_trend  = (_entry_idxs >= _slb2) & ~np.isnan(_trend_arr[_entry_idxs])
+                        _slopes_bt  = np.where(
+                            _has_trend,
+                            (_trend_arr[_entry_idxs] - _trend_arr[_prev_idxs]) / _slb2,
+                            np.nan,
+                        )
+                        _al_mask = (((_sides > 0) & (_slopes_bt > 0)) |
+                                    ((_sides < 0) & (_slopes_bt < 0)))
+                        _valid   = ~np.isnan(_slopes_bt)
+                        _al_pct  = float(_al_mask[_valid].mean()) if _valid.any() else float('nan')
+                        bc4.metric("Trend-aligned trades",
+                                   f"{_al_pct:.0%}" if not np.isnan(_al_pct) else "—")
 
         except Exception as e:
             st.error(f"Signal computation failed: {e}")
@@ -1629,3 +1723,384 @@ with tab9:
                 for _c in ['OOS_AvgHold']:
                     _q[_c] = _q[_c].map('{:.0f}d'.format)
                 _tbl(_q, show_index=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 10 — Scenario Scanner
+# ════════════════════════════════════════════════════════════════════════════
+with tab10:
+    from engine.backtest import (
+        prepare_returns as _sc_prep, run_backtest as _sc_bt,
+        aggregate_trades as _sc_agg,
+    )
+    from engine.numba_core import COL_ENTRY_IDX as _SC_CEI, COL_SIDE as _SC_CS
+
+    st.header("Scenario Scanner")
+    st.caption(
+        "Grid sweep: crossing signal backtest across asset classes and parameter combinations. "
+        "Buckets results by average holding period and ranks by net expectancy."
+    )
+
+    # ── Price loading helper (cached, read-only) ──────────────────────────
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _sc_load_prices(asset_key: str) -> tuple[pd.DataFrame, list[str]]:
+        """Return (prices_df, valid_instruments) for one asset class."""
+        _insts = [c for c in get_tradeable_instruments(asset_key) if c not in FI_EXCLUDE]
+        _df    = registry.get_daily_prices(_insts)
+        _valid = [c for c in _insts if c in _df.columns]
+        return _df, _valid
+
+    # ── Scope selectors ───────────────────────────────────────────────────
+    st.subheader("Scope")
+    _sc1, _sc2 = st.columns(2)
+    with _sc1:
+        st.markdown("**Intra-asset**")
+        _sc_comm_intra = st.checkbox("Commodities",   key='sc_comm_intra')
+        _sc_fx_intra   = st.checkbox("FX",            key='sc_fx_intra')
+        _sc_fi_intra   = st.checkbox("Fixed Income",  key='sc_fi_intra')
+    with _sc2:
+        st.markdown("**Cross-asset**")
+        _sc_comm_fx  = st.checkbox("Commodities × FX",           key='sc_comm_fx')
+        _sc_comm_eq  = st.checkbox("Commodities × Equity",       key='sc_comm_eq')
+        _sc_comm_fi  = st.checkbox("Commodities × Fixed Income", key='sc_comm_fi')
+        _sc_fx_eq    = st.checkbox("FX × Equity",                key='sc_fx_eq')
+
+    # ── Parameter grid ────────────────────────────────────────────────────
+    st.subheader("Parameter grid")
+    _pg1, _pg2, _pg3 = st.columns(3)
+    with _pg1:
+        _sc_entry_sds = st.multiselect(
+            "Entry SD", [2.0, 2.5, 3.0], default=[2.0, 2.5, 3.0], key='sc_entry_sds',
+        )
+    with _pg2:
+        _sc_exit_sds = st.multiselect(
+            "Exit SD", [0.5, 1.0, 1.5], default=[0.5, 1.0, 1.5], key='sc_exit_sds',
+        )
+    with _pg3:
+        _sc_vol_wins = st.multiselect(
+            "Vol window (days)", [50, 130, 262], default=[50, 130, 262], key='sc_vol_wins',
+        )
+
+    _pg4, _pg5, _pg6 = st.columns(3)
+    with _pg4:
+        _sc_fin_rate = st.number_input(
+            "Financing %pa", 0.0, 20.0, 4.88, 0.01, key='sc_fin_rate',
+        )
+    with _pg5:
+        _sc_win_opts  = {'3 years': 786, '5 years': 1310, 'All': 0}
+        _sc_win_label = st.selectbox(
+            "History window", list(_sc_win_opts.keys()), index=2, key='sc_window',
+        )
+        _sc_win_days = _sc_win_opts[_sc_win_label] or None
+    with _pg6:
+        _sc_min_trades = st.number_input(
+            "Min trades floor", 1, 100, 10, key='sc_min_trades',
+        )
+
+    _pg7, _pg8, _ = st.columns(3)
+    with _pg7:
+        _sc_trend_win = int(st.number_input(
+            "Trend filter window (days)", 130, 756, 262, key='sc_trend_win',
+        ))
+    with _pg8:
+        _sc_trend_mode = st.selectbox(
+            "Trend filter mode",
+            ["Off", "Aligned only", "Show alignment column"],
+            index=1, key='sc_trend_mode',
+        )
+
+    _sc_run = st.button(
+        "▶ Run scenario scan", type="primary", use_container_width=True, key='sc_run',
+    )
+
+    # ── Computation ───────────────────────────────────────────────────────
+    if _sc_run:
+        _scope_defs: list[tuple[str, str, bool, str]] = []
+        if _sc_comm_intra: _scope_defs.append(('commodities',  'commodities',  True,  'Commodity'))
+        if _sc_fx_intra:   _scope_defs.append(('fx',           'fx',           True,  'FX'))
+        if _sc_fi_intra:   _scope_defs.append(('fixed_income', 'fixed_income', True,  'Fixed Income'))
+        if _sc_comm_fx:    _scope_defs.append(('commodities',  'fx',           False, 'Commodity vs FX'))
+        if _sc_comm_eq:    _scope_defs.append(('commodities',  'equity',       False, 'Commodity vs Equity'))
+        if _sc_comm_fi:    _scope_defs.append(('commodities',  'fixed_income', False, 'Commodity vs Fixed Income'))
+        if _sc_fx_eq:      _scope_defs.append(('fx',           'equity',       False, 'FX vs Equity'))
+
+        if not _scope_defs:
+            st.warning("Select at least one asset class scope.")
+        elif not _sc_entry_sds or not _sc_exit_sds or not _sc_vol_wins:
+            st.warning("Select at least one value for each parameter in the grid.")
+        else:
+            _sc_param_combos = [
+                (float(e), float(x), int(v))
+                for e in _sc_entry_sds
+                for x in _sc_exit_sds
+                for v in _sc_vol_wins
+            ]
+            _sc_fin_daily = _sc_fin_rate / 100.0 / 365.0
+
+            # Build scope → pairs list (instrument lookup only — no price loading yet)
+            _sc_scope_work: list[tuple] = []
+            for _lk, _sk, _intra, _label in _scope_defs:
+                _l_insts = [c for c in get_tradeable_instruments(_lk) if c not in FI_EXCLUDE]
+                _s_insts = [c for c in get_tradeable_instruments(_sk) if c not in FI_EXCLUDE]
+                if _intra:
+                    _pairs = list(combinations(_l_insts, 2))
+                else:
+                    _pairs = [(a, b) for a in _l_insts for b in _s_insts]
+                _sc_scope_work.append((_lk, _sk, _intra, _label, _l_insts, _s_insts, _pairs))
+
+            _sc_total_pairs = sum(len(w[6]) for w in _sc_scope_work)
+            if _sc_total_pairs == 0:
+                st.warning("No instrument pairs found for the selected scope.")
+            else:
+                _sc_rows: list[dict] = []
+                _sc_prog  = st.progress(0.0)
+                _sc_pstat = st.empty()
+                _sc_done  = 0
+
+                for _lk, _sk, _intra, _label, _l_insts, _s_insts, _pairs in _sc_scope_work:
+                    _l_px, _ = _sc_load_prices(_lk)
+                    _s_px, _ = _sc_load_prices(_sk) if not _intra else (_l_px, _l_insts)
+
+                    _sc_slb = min(20, _sc_trend_win // 10)
+
+                    for (_long_i, _short_i) in _pairs:
+                        if _long_i not in _l_px.columns or _short_i not in _s_px.columns:
+                            _sc_done += 1
+                            continue
+
+                        if _intra:
+                            _pair_df = _l_px[[_long_i, _short_i]].dropna()
+                        else:
+                            _pair_df = pd.concat(
+                                [_l_px[[_long_i]], _s_px[[_short_i]]],
+                                axis=1, join='inner',
+                            ).dropna()
+
+                        if len(_pair_df) < 130:
+                            _sc_done += 1
+                            continue
+
+                        # Round-trip spread cost: 4 × mean(spread_pct_long, spread_pct_short)
+                        _lc_cfg = ASSET_CLASSES[_lk]['instruments'].get(_long_i,  {})
+                        _sc_cfg = ASSET_CLASSES[_sk]['instruments'].get(_short_i, {})
+                        _l_sp = _lc_cfg.get('spread_pct', 0.001) if isinstance(_lc_cfg, dict) else 0.001
+                        _s_sp = _sc_cfg.get('spread_pct', 0.001) if isinstance(_sc_cfg, dict) else 0.001
+                        _pair_cost = 2.0 * (_l_sp + _s_sp)
+
+                        _l_disp = get_display_name(_lk, _long_i)
+                        _s_disp = get_display_name(_sk, _short_i)
+
+                        # Trend series — computed once per pair on raw log-return spread
+                        # (independent of vol_window, so valid across all param combos)
+                        _raw_lr = (np.log(_pair_df[_long_i] / _pair_df[_short_i])
+                                   .diff().fillna(0))
+                        _raw_cum_spr = _raw_lr.cumsum()
+                        _trend_ser_pair = _raw_cum_spr.rolling(
+                            _sc_trend_win, min_periods=10
+                        ).mean()
+                        _trend_arr_pair = _trend_ser_pair.values
+
+                        for (_e_sd, _x_sd, _v_win) in _sc_param_combos:
+                            try:
+                                _sc_scaled, _sc_day_ints, _sc_index = _sc_prep(
+                                    _pair_df, [_long_i, _short_i],
+                                    vol_window=_v_win,
+                                    window_days=_sc_win_days,
+                                )
+                                if _sc_scaled.shape[0] < _v_win:
+                                    continue
+                                _sc_spread = _sc_scaled[:, 0] - _sc_scaled[:, 1]
+                                _sc_bt_res = _sc_bt(
+                                    _sc_spread, _sc_day_ints,
+                                    vol_window=_v_win,
+                                    xing_sd=_e_sd, exit_sd=_x_sd,
+                                    spread_cost_pct=_pair_cost,
+                                    financing_daily_pct=_sc_fin_daily,
+                                    n_legs=2,
+                                )
+                                _n_tr = _sc_bt_res['n_trades']
+                                _sc_s = _sc_bt_res['summary']
+                                _use_s = _sc_s
+                                _use_n = _n_tr
+
+                                # Post-hoc trend alignment (vectorised)
+                                _al_pct = float('nan')
+                                if _n_tr > 0:
+                                    _raw_t = _sc_bt_res['trades_raw'][:_n_tr]
+                                    _eidxs = _raw_t[:, _SC_CEI].astype(int)
+                                    _sides = _raw_t[:, _SC_CS]
+                                    # Map scaled-array indices → pair_df positions via date
+                                    _edates = _sc_index[_eidxs]
+                                    _tipos  = _trend_ser_pair.index.get_indexer(
+                                        _edates, method='nearest'
+                                    )
+                                    _prev_p = np.maximum(0, _tipos - _sc_slb)
+                                    _has_tr = (_tipos >= _sc_slb) & ~np.isnan(_trend_arr_pair[_tipos])
+                                    _slp = np.where(
+                                        _has_tr,
+                                        (_trend_arr_pair[_tipos] - _trend_arr_pair[_prev_p]) / _sc_slb,
+                                        np.nan,
+                                    )
+                                    _al = (((_sides > 0) & (_slp > 0)) |
+                                           ((_sides < 0) & (_slp < 0)))
+                                    _vld = ~np.isnan(_slp)
+                                    if _vld.any():
+                                        _al_pct = float(_al[_vld].mean())
+
+                                    if _sc_trend_mode == "Aligned only":
+                                        _al_filter = _al & _vld
+                                        _n_al = int(_al_filter.sum())
+                                        if _n_al < int(_sc_min_trades):
+                                            continue
+                                        _use_s = _sc_agg(
+                                            _raw_t[_al_filter], _n_al,
+                                            spread_cost_pct=_pair_cost,
+                                            financing_daily_pct=_sc_fin_daily,
+                                            n_legs=2,
+                                        )
+                                        _use_n = _n_al
+
+                                _sc_rows.append({
+                                    '_long':         _long_i,
+                                    '_short':        _short_i,
+                                    'Long':          _l_disp,
+                                    'Short':         _s_disp,
+                                    'Asset Classes': _label,
+                                    'Entry SD':      _e_sd,
+                                    'Exit SD':       _x_sd,
+                                    'Vol Window':    _v_win,
+                                    'Trend Window':  f'{_sc_trend_win}d',
+                                    'Trades':        int(_use_n),
+                                    'Gross WR%':     float(_use_s.get('gross_wr',    0.0)),
+                                    'Net WR%':       float(_use_s.get('net_wr',      0.0)),
+                                    'Avg Gross':     float(_use_s.get('avg_gross',   0.0)),
+                                    'Avg Net':       float(_use_s.get('avg_net',     0.0)),
+                                    'Avg Hold':      float(_use_s.get('avg_holding', 0.0)),
+                                    'Est Cost':      _pair_cost,
+                                    'Aligned%':      _al_pct,
+                                })
+                            except Exception:
+                                continue
+
+                        _sc_done += 1
+                        _sc_prog.progress(min(1.0, _sc_done / _sc_total_pairs))
+                        _sc_pstat.caption(
+                            f"Scanning… {_sc_done:,} / {_sc_total_pairs:,} pairs"
+                        )
+
+                _sc_prog.progress(1.0)
+                _sc_pstat.empty()
+
+                if _sc_rows:
+                    _sc_full_df = pd.DataFrame(_sc_rows)
+                    st.session_state['scenario_results'] = _sc_full_df
+                    st.session_state['scenario_params'] = (
+                        f"Entry SD: {_sc_entry_sds}  |  Exit SD: {_sc_exit_sds}  |  "
+                        f"Vol window: {_sc_vol_wins}  |  History: {_sc_win_label}  |  "
+                        f"Financing: {_sc_fin_rate:.2f}%pa  |  Min trades: {int(_sc_min_trades)}"
+                    )
+                    st.success(
+                        f"Scan complete — {len(_sc_full_df):,} total results across "
+                        f"{_sc_total_pairs:,} pairs × {len(_sc_param_combos)} parameter combos."
+                    )
+                else:
+                    st.info("No results — try relaxing parameters or adding more scopes.")
+
+    # ── Results display ───────────────────────────────────────────────────
+    if 'scenario_results' in st.session_state:
+        _sr_full = st.session_state['scenario_results']
+        st.caption(f"**Last run:** {st.session_state.get('scenario_params', '')}")
+        st.divider()
+
+        # Apply display filters
+        _sr = _sr_full[_sr_full['Trades'] >= int(_sc_min_trades)].copy()
+        _sr = _sr[_sr['Avg Net'] > 0].copy()
+
+        if _sr.empty:
+            st.info(
+                f"No results pass filters (trades ≥ {int(_sc_min_trades)}, avg net > 0). "
+                "Use the CSV download below for the full unfiltered dataset."
+            )
+        else:
+            def _sc_bucket(h: float) -> str:
+                if h <= 45:  return '🟢 Short'
+                if h <= 90:  return '🟡 Medium'
+                return '🔴 Long'
+
+            _sr['_bucket'] = _sr['Avg Hold'].apply(_sc_bucket)
+
+            for _bkt, _desc in [
+                ('🟢 Short',  '≤ 45d'),
+                ('🟡 Medium', '46–90d'),
+                ('🔴 Long',   '> 90d'),
+            ]:
+                _bdf = (
+                    _sr[_sr['_bucket'] == _bkt]
+                    .sort_values('Avg Net', ascending=False)
+                    .reset_index(drop=True)
+                )
+                with st.expander(
+                    f"{_bkt} ({_desc}) — {len(_bdf)} pairs found", expanded=True
+                ):
+                    if _bdf.empty:
+                        st.caption("No results in this bucket.")
+                        continue
+
+                    _bdf.insert(0, 'Rank', range(1, len(_bdf) + 1))
+                    _disp_cols = [
+                        'Rank', 'Long', 'Short', 'Asset Classes',
+                        'Entry SD', 'Exit SD', 'Vol Window', 'Trend Window', 'Trades',
+                        'Gross WR%', 'Net WR%', 'Avg Gross', 'Avg Net',
+                        'Avg Hold', 'Est Cost', 'Aligned%',
+                    ]
+                    _tbl_df = _bdf[_disp_cols].copy()
+                    _tbl_df['Gross WR%'] = _tbl_df['Gross WR%'].map('{:.1%}'.format)
+                    _tbl_df['Net WR%']   = _tbl_df['Net WR%'].map('{:.1%}'.format)
+                    _tbl_df['Avg Gross'] = _tbl_df['Avg Gross'].map('{:+.4f}'.format)
+                    _tbl_df['Avg Net']   = _tbl_df['Avg Net'].map('{:+.4f}'.format)
+                    _tbl_df['Avg Hold']  = _tbl_df['Avg Hold'].map('{:.0f}d'.format)
+                    _tbl_df['Est Cost']  = _tbl_df['Est Cost'].map('{:.3%}'.format)
+                    _tbl_df['Aligned%']  = _tbl_df['Aligned%'].apply(
+                        lambda v: f'{v:.0%}' if not (isinstance(v, float) and np.isnan(v)) else '—'
+                    )
+
+                    st.dataframe(_tbl_df, use_container_width=True, hide_index=True)
+
+                    # Open in Pair Analysis — selectbox + button
+                    _pair_labels = [
+                        f"#{r['Rank']} — {r['Long']} / {r['Short']}"
+                        for _, r in _bdf.iterrows()
+                    ]
+                    _sel = st.selectbox(
+                        "Open a pair in Pair Analysis →",
+                        ['— select a pair —'] + _pair_labels,
+                        key=f'sc_sel_{_bkt}',
+                    )
+                    if _sel != '— select a pair —' and st.button(
+                        "Open in Pair Analysis →", key=f'sc_open_{_bkt}',
+                    ):
+                        _row = _bdf.iloc[_pair_labels.index(_sel)]
+                        st.session_state['pa_long']  = [_row['_long']]
+                        st.session_state['pa_short'] = [_row['_short']]
+                        st.session_state['pa_pair']  = '— Custom pair —'
+                        st.toast(
+                            f"Loaded {_row['Long']} / {_row['Short']} — "
+                            "switch to the Pair Analysis tab",
+                            icon="📈",
+                        )
+
+        # ── CSV export ────────────────────────────────────────────────────
+        st.divider()
+        _sc_csv = (
+            _sr_full
+            .drop(columns=['_long', '_short'], errors='ignore')
+            .to_csv(index=False)
+            .encode('utf-8')
+        )
+        st.download_button(
+            "⬇ Download full results as CSV",
+            _sc_csv,
+            file_name="scenario_results.csv",
+            mime="text/csv",
+            key='sc_download',
+        )
