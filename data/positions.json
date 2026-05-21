@@ -2,17 +2,33 @@
   {
     "id": "test-livemonitor-001",
     "name": "TEST: UKX/CBK Live Monitor",
-    "basket": {"long_legs": ["UKX"], "short_legs": ["CBK"]},
+    "basket": {
+      "long_legs": [
+        "UKX"
+      ],
+      "short_legs": [
+        "CBK"
+      ]
+    },
     "direction": "long_spread",
     "entry_date": "2026-04-15",
-    "entry_prices": {"UKX": 10559.60, "CBK": 8274.57},
-    "stakes": {"UKX": 1.0, "CBK": -1.27},
+    "entry_prices": {
+      "UKX": 10559.6,
+      "CBK": 8274.57
+    },
+    "stakes": {
+      "UKX": 1.0,
+      "CBK": -1.27
+    },
     "target_exposure": 10000.0,
     "comments": "Temporary test position for Live Monitor browser test",
-    "status": "open",
-    "exit_date": null,
-    "exit_prices": {},
-    "realised_pnl": 0.0,
-    "pct_open": 1.0
+    "status": "closed",
+    "exit_date": "2026-05-20",
+    "exit_prices": {
+      "UKX": 10374.6103515625,
+      "CBK": 8050.7001953125
+    },
+    "realised_pnl": 99.32500351562425,
+    "pct_open": 0.0
   }
 ]

@@ -54,6 +54,22 @@ def render() -> None:
             pc2.metric("Financing", f"£{-pos.financing_cost_to_date():,.0f}")
             pc3.metric("Net P&L", f"£{pos.net_pnl(cp):+,.0f}")
 
-            if st.button("Open in Pair Analysis →", key=f"view_{pos.id}"):
+            _bc1, _bc2 = st.columns(2)
+            if _bc1.button("Open in Pair Analysis →", key=f"view_{pos.id}"):
                 st.session_state['pa_pair'] = f"{pos.name} ({pos.id})"
+                st.session_state['wf_pair'] = {
+                    'long':   list(pos.basket.long_legs),
+                    'short':  list(pos.basket.short_legs),
+                    'source': 'tab1',
+                }
                 st.toast(f"Selected {pos.name} — open the Pair Analysis tab", icon="📈")
+            if _bc2.button("Validate in Walk-Forward →", key=f"wf_{pos.id}"):
+                st.session_state['wf_pair'] = {
+                    'long':   list(pos.basket.long_legs),
+                    'short':  list(pos.basket.short_legs),
+                    'source': 'tab1',
+                }
+                st.toast(
+                    f"Loaded {pos.name} — switch to Walk-Forward Analysis tab",
+                    icon="📐",
+                )

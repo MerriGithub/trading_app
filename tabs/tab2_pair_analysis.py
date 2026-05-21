@@ -140,6 +140,12 @@ def render() -> None:
     st.header("Pair Analysis")
     st.caption("Inspect signal history, charts, and backtest stats for any pair.")
 
+    # Transfer pending values from Tab 10 before widgets are instantiated
+    for _k in ('pa_long', 'pa_short', 'pa_pair'):
+        _pk = f'{_k}_pending'
+        if _pk in st.session_state:
+            st.session_state[_k] = st.session_state.pop(_pk)
+
     pair_choices = ['— Custom pair —'] + [f"{p.name} ({p.id})" for p in portfolio.open_positions]
     if st.session_state.get('pa_pair') not in pair_choices:
         st.session_state['pa_pair'] = '— Custom pair —'
@@ -288,7 +294,7 @@ def render() -> None:
             try:
                 _spread_cost, _fin_daily = _compute_basket_costs(
                     basket.long_legs, basket.short_legs,
-                    broker_profile=st.session_state.get('broker_profile', 'ig_spreadbet'),
+                    broker_profile=st.session_state.get('tab3_broker_profile', 'ig_spreadbet'),
                 )
                 st.session_state['tab2_backtest_result'] = _pair_backtest(
                     tuple(basket.long_legs), tuple(basket.short_legs),
@@ -376,7 +382,7 @@ def render() -> None:
                     bc3.metric("Avg net",     f"{bt['avg_net']:+.4f}")
 
                 st.markdown("---")
-                if st.button("Send to Walk-Forward →", key="tab2_send_wf"):
+                if st.button("→ Validate in Walk-Forward", key="tab2_send_wf"):
                     st.session_state['wf_pair'] = {
                         'long':          list(basket.long_legs),
                         'short':         list(basket.short_legs),

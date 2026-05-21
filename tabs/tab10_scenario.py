@@ -66,7 +66,7 @@ def render() -> None:
             "Broker / account type",
             options=["ig_spreadbet", "ig_cfd"],
             format_func=lambda x: {"ig_spreadbet": "IG Spread Bet", "ig_cfd": "IG CFD"}[x],
-            key="broker_profile",
+            key="tab10_broker_profile",
         )
     with _pg5:
         _sc_win_opts  = {'3 years': 786, '5 years': 1310, 'All': 0}
@@ -451,14 +451,24 @@ def _render_results(sc_min_trades: int) -> None:
                     "Open in Pair Analysis →", key=f'sc_open_{_bkt}',
                 ):
                     _row = _bdf.iloc[_pair_labels.index(_sel)]
-                    st.session_state['pa_long']  = [_row['_long']]
-                    st.session_state['pa_short'] = [_row['_short']]
-                    st.session_state['pa_pair']  = '— Custom pair —'
+                    st.session_state['pa_long_pending']   = [_row['_long']]
+                    st.session_state['pa_short_pending']  = [_row['_short']]
+                    st.session_state['pa_pair_pending']   = '— Custom pair —'
+                    st.session_state['sc_long_pending']   = [_row['_long']]
+                    st.session_state['sc_short_pending']  = [_row['_short']]
+                    st.session_state['wf11_long_pending'] = [_row['_long']]
+                    st.session_state['wf11_short_pending']= [_row['_short']]
+                    st.session_state['wf_pair'] = {
+                        'long':   [_row['_long']],
+                        'short':  [_row['_short']],
+                        'source': 'tab10',
+                    }
                     st.toast(
                         f"Loaded {_row['Long']} / {_row['Short']} — "
-                        "switch to the Pair Analysis tab",
+                        "switching to pair tabs",
                         icon="📈",
                     )
+                    st.rerun()
 
     st.divider()
     _sc_csv = (

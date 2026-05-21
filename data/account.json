@@ -1,23 +1,91 @@
 {
-    "starting_capital": 10000.0,
-    "margin": 0.10,
-    "spread_cost_fallback": 0.001,
-    "financing": {
-        "equity": {
-            "long_rate": 0.0488,
-            "short_rate": 0.0088
-        },
-        "fx": {
-            "long_rate": 0.018,
-            "short_rate": -0.018
-        },
-        "commodities": {
-            "long_rate": 0.0488,
-            "short_rate": 0.0088
-        },
-        "fixed_income": {
-            "long_rate": 0.0488,
-            "short_rate": 0.0088
-        }
+  "starting_capital": 10000.0,
+  "margin": 0.10,
+  "spread_cost_fallback": 0.001,
+  "active_broker_profile": "ig_spreadbet",
+  "financing": {
+    "equity": {
+      "long_rate": 0.0488,
+      "short_rate": 0.0088
+    },
+    "fx": {
+      "long_rate": 0.018,
+      "short_rate": -0.018
+    },
+    "commodities": {
+      "long_rate": 0.0488,
+      "short_rate": 0.0088
+    },
+    "fixed_income": {
+      "long_rate": 0.0488,
+      "short_rate": 0.0088
     }
+  },
+  "broker_profiles": {
+    "ig_spreadbet": {
+      "label": "IG Spread Bet",
+      "commodity_admin_pct": 0.034,
+      "commodity_divisor": 360,
+      "fx_admin_pct": 0.015,
+      "fx_divisor": 360,
+      "index_admin_pct": 0.034,
+      "index_divisor": 365,
+      "weekend_commodity_multiplier": 3,
+      "weekend_fx_day": "wednesday"
+    },
+    "ig_cfd": {
+      "label": "IG CFD",
+      "commodity_admin_pct": 0.030,
+      "commodity_divisor": 360,
+      "fx_admin_pct": 0.003,
+      "fx_divisor": 360,
+      "index_admin_pct": 0.030,
+      "index_divisor": 365,
+      "weekend_commodity_multiplier": 3,
+      "weekend_fx_day": "wednesday"
+    }
+  },
+  "benchmark_rates": {
+    "GBP": 0.0376,
+    "USD": 0.0367,
+    "EUR": 0.0198,
+    "CHF": -0.0011,
+    "JPY": 0.0070,
+    "AUD": 0.0430,
+    "NZD": 0.0247,
+    "CAD": 0.0225
+  },
+  "commodity_basis_estimates": {
+    "GOLD":      0.040,
+    "SILVER":    0.035,
+    "PLATINUM":  0.030,
+    "PALLADIUM": 0.035,
+    "COPPER":    0.030,
+    "WTI":       0.050,
+    "BRENT":     0.050,
+    "NATGAS":    0.080,
+    "WHEAT":     0.020,
+    "CORN":      0.020,
+    "SOYBEANS":  0.020,
+    "COFFEE":    0.025,
+    "SUGAR":     0.025
+  },
+  "fx_currency_map": {
+    "EURUSD": ["EUR", "USD"],
+    "GBPUSD": ["GBP", "USD"],
+    "USDJPY": ["USD", "JPY"],
+    "USDCHF": ["USD", "CHF"],
+    "AUDUSD": ["AUD", "USD"],
+    "NZDUSD": ["NZD", "USD"],
+    "USDCAD": ["USD", "CAD"],
+    "EURGBP": ["EUR", "GBP"],
+    "EURJPY": ["EUR", "JPY"],
+    "GBPJPY": ["GBP", "JPY"],
+    "EURCHF": ["EUR", "CHF"],
+    "AUDNZD": ["AUD", "NZD"]
+  },
+  "fx_rollover_pattern": {
+    "standard_g10": {"wed": 4, "other": 1, "fri": 0},
+    "usdcad":       {"thu": 4, "other": 1, "fri": 0}
+  }
 }

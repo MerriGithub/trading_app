@@ -203,6 +203,12 @@ def render() -> None:
     st.header("Walk-Forward Analysis")
     st.caption("Rolling IS/OOS validation. Tests whether a pair + parameters are robust or curve-fitted.")
 
+    # Transfer pending pair from Tab 10 before widgets are instantiated
+    for _k in ('wf11_long', 'wf11_short'):
+        _pk = f'{_k}_pending'
+        if _pk in st.session_state:
+            st.session_state[_k] = st.session_state.pop(_pk)
+
     wf_pair = st.session_state.get('wf_pair')
     if wf_pair:
         _src = wf_pair.get('source', '').replace('tab', 'Tab ')
@@ -240,7 +246,7 @@ def render() -> None:
     _step = int(ww3.number_input("Step size (days)",      63,  756,  252, key='wf11_step'))
     _broker_opts = ["ig_spreadbet", "ig_cfd"]
     _broker_lbl  = {"ig_spreadbet": "IG Spread Bet", "ig_cfd": "IG CFD"}
-    _broker_def  = st.session_state.get('broker_profile', 'ig_spreadbet')
+    _broker_def  = st.session_state.get('tab3_broker_profile', 'ig_spreadbet')
     _broker_idx  = _broker_opts.index(_broker_def) if _broker_def in _broker_opts else 0
     _broker = ww4.selectbox("Broker", _broker_opts, index=_broker_idx,
                             format_func=lambda x: _broker_lbl[x], key='wf11_broker')

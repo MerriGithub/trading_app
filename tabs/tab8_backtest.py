@@ -164,9 +164,9 @@ def _bt8_nav_buttons(df: pd.DataFrame, params: dict, ac_long: str, ac_short: str
     nc1, nc2, _ = st.columns([2, 2, 2])
     if nc1.button("Open in Pair Analysis →", key=f'bt8_pa{key_sfx}'):
         if _lc and _sc:
-            st.session_state['pa_long']  = _lc
-            st.session_state['pa_short'] = _sc
-            st.session_state['pa_pair']  = '— Custom pair —'
+            st.session_state['pa_long_pending']  = _lc
+            st.session_state['pa_short_pending'] = _sc
+            st.session_state['pa_pair_pending']  = '— Custom pair —'
             st.toast(
                 f"Loaded {_row.get('Long','')} / {_row.get('Short','')} — "
                 "switch to Pair Analysis tab", icon="📈",

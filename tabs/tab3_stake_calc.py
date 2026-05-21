@@ -13,13 +13,19 @@ def render() -> None:
     st.header("Stake Calculator")
     st.caption("Vol-targeted stake sizing across any asset class.")
 
+    # Transfer pending pair from Tab 10 before widgets are instantiated
+    for _k in ('sc_long', 'sc_short'):
+        _pk = f'{_k}_pending'
+        if _pk in st.session_state:
+            st.session_state[_k] = st.session_state.pop(_pk)
+
     hdr1, hdr2 = st.columns([3, 1])
     with hdr2:
         broker_profile = st.selectbox(
             "Broker / account type",
             options=["ig_spreadbet", "ig_cfd"],
             format_func=lambda x: {"ig_spreadbet": "IG Spread Bet", "ig_cfd": "IG CFD"}[x],
-            key="broker_profile",
+            key="tab3_broker_profile",
         )
 
     sc1, sc2 = st.columns(2)
