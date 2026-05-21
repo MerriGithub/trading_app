@@ -393,11 +393,8 @@ def render() -> None:
                         'trend_mode':    'Both passes',
                         'source':        'tab2',
                     }
-                    st.toast(
-                        f"Loaded {', '.join(basket.long_legs)} / {', '.join(basket.short_legs)} "
-                        "— switch to Walk-Forward Analysis tab",
-                        icon="📐",
-                    )
+                    st.session_state['sidebar_nav'] = "🔀 Walk-Forward"
+                    st.rerun()
 
     except Exception as e:
         st.error(f"Signal computation failed: {e}")

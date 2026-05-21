@@ -62,14 +62,13 @@ def render() -> None:
                     'short':  list(pos.basket.short_legs),
                     'source': 'tab1',
                 }
-                st.toast(f"Selected {pos.name} — open the Pair Analysis tab", icon="📈")
+                st.session_state['sidebar_nav'] = "📈 Pair Analysis"
+                st.rerun()
             if _bc2.button("Validate in Walk-Forward →", key=f"wf_{pos.id}"):
                 st.session_state['wf_pair'] = {
                     'long':   list(pos.basket.long_legs),
                     'short':  list(pos.basket.short_legs),
                     'source': 'tab1',
                 }
-                st.toast(
-                    f"Loaded {pos.name} — switch to Walk-Forward Analysis tab",
-                    icon="📐",
-                )
+                st.session_state['sidebar_nav'] = "🔀 Walk-Forward"
+                st.rerun()

@@ -19,7 +19,12 @@ import tabs.tab9_walkforward   as tab9
 import tabs.tab10_scenario     as tab10
 import tabs.tab11_walkforward  as tab11
 
-st.set_page_config(page_title="Spread Trading Platform", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="Spread Trading Platform",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 # ── Session state defaults ────────────────────────────────────────────────────
 if 'pending_close' not in st.session_state:
@@ -31,24 +36,60 @@ if 'leg_count' not in st.session_state:
 if 'signal_alerts' not in st.session_state:
     st.session_state['signal_alerts'] = _check_signal_alerts(portfolio, registry)
 
-_n_alerts   = len(st.session_state['signal_alerts'])
-_live_label = f"⏱ Live 🔔 {_n_alerts}" if _n_alerts > 0 else "⏱ Live"
+_n_alerts = len(st.session_state['signal_alerts'])
 
-# ── Tabs ──────────────────────────────────────────────────────────────────────
-_t1, _t2, _t3, _t4, _t5, _t6, _t7, _t8, _t9, _t10, _t11 = st.tabs([
-    "📊 Monitor", "📈 Pair Analysis", "🧮 Stake Calc", "🗂 Portfolio",
-    "🔍 Search", _live_label, "📓 Journal", "🔬 Backtest", "🔄 Trade Validation",
-    "🔭 Scenario", "📐 Walk-Forward Analysis",
-])
+_TABS = [
+    "📊 Monitor",
+    "📈 Pair Analysis",
+    "🧮 Stake Calc",
+    "💼 Portfolio",
+    "🔍 Search",
+    f"{'🔔 Live (' + str(_n_alerts) + ')' if _n_alerts > 0 else '⏱️ Live'}",
+    "📓 Journal",
+    "📉 Backtest",
+    "✅ Trade Validation",
+    "🎯 Scenario",
+    "🔀 Walk-Forward",
+]
 
-with _t1:  tab1.render()
-with _t2:  tab2.render()
-with _t3:  tab3.render()
-with _t4:  tab4.render()
-with _t5:  tab5.render()
-with _t6:  tab6.render()
-with _t7:  tab7.render()
-with _t8:  tab8.render()
-with _t9:  tab9.render()
-with _t10: tab10.render()
-with _t11: tab11.render()
+with st.sidebar:
+    st.markdown("## 📡 Spread Trading")
+    st.markdown("---")
+    _active_tab = st.radio(
+        "Navigation",
+        _TABS,
+        label_visibility="collapsed",
+        key="sidebar_nav",
+    )
+    st.markdown("---")
+    try:
+        from account import load_account as _load_account
+        _acct = _load_account()
+        _open_n = len(portfolio.open_positions)
+        st.caption(f"Capital: £{_acct.get('starting_capital', 0):,.0f}")
+        st.caption(f"Open positions: {_open_n}")
+    except Exception:
+        pass
+
+if _active_tab == _TABS[0]:    # Monitor
+    tab1.render()
+elif _active_tab == _TABS[1]:  # Pair Analysis
+    tab2.render()
+elif _active_tab == _TABS[2]:  # Stake Calc
+    tab3.render()
+elif _active_tab == _TABS[3]:  # Portfolio
+    tab4.render()
+elif _active_tab == _TABS[4]:  # Search
+    tab5.render()
+elif _active_tab == _TABS[5]:  # Live
+    tab6.render()
+elif _active_tab == _TABS[6]:  # Journal
+    tab7.render()
+elif _active_tab == _TABS[7]:  # Backtest
+    tab8.render()
+elif _active_tab == _TABS[8]:  # Trade Validation
+    tab9.render()
+elif _active_tab == _TABS[9]:  # Scenario
+    tab10.render()
+elif _active_tab == _TABS[10]: # Walk-Forward
+    tab11.render()
