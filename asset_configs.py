@@ -35,18 +35,18 @@ EQUITY = {
         'CRM', 'CIL', 'CPH', 'CTN', 'CTB',
     ]},
     'instruments': {
-        'UKX': {'display': 'FTSE 100',   'data_source': 'yahoo', 'intraday_ticker': '^FTSE',    'spread_pct': 0.00038, 'point_size': 1.0, 'sector': 'Europe'},
-        'CBK': {'display': 'CAC 40',     'data_source': 'yahoo', 'intraday_ticker': '^FCHI',    'spread_pct': 0.00050, 'point_size': 1.0, 'sector': 'Europe'},
-        'CEY': {'display': 'FTSE MIB',   'data_source': 'yahoo', 'intraday_ticker': None,       'spread_pct': 0.00135, 'point_size': 1.0, 'sector': 'Europe'},
-        'CFR': {'display': 'DAX',        'data_source': 'yahoo', 'intraday_ticker': '^GDAXI',   'spread_pct': 0.00022, 'point_size': 1.0, 'sector': 'Europe'},
-        'CMD': {'display': 'IBEX 35',    'data_source': 'yahoo', 'intraday_ticker': '^IBEX',    'spread_pct': 0.00055, 'point_size': 1.0, 'sector': 'Europe'},
-        'CEI': {'display': 'STOXX 50',   'data_source': 'yahoo', 'intraday_ticker': '^STOXX50E','spread_pct': 0.00080, 'point_size': 1.0, 'sector': 'Europe'},
-        'COI': {'display': 'SMI',        'data_source': 'yahoo', 'intraday_ticker': '^SSMI',    'spread_pct': 0.00042, 'point_size': 1.0, 'sector': 'Europe'},
-        'CRM': {'display': 'HSI',        'data_source': 'yahoo', 'intraday_ticker': '^HSI',     'spread_pct': 0.00050, 'point_size': 1.0, 'sector': 'Asia'},
-        'CIL': {'display': 'ASX 200',    'data_source': 'yahoo', 'intraday_ticker': '^AXJO',    'spread_pct': 0.00050, 'point_size': 1.0, 'sector': 'Asia'},
-        'CPH': {'display': 'NASDAQ 100', 'data_source': 'yahoo', 'intraday_ticker': '^NDX',     'spread_pct': 0.00010, 'point_size': 1.0, 'sector': 'US'},
-        'CTN': {'display': 'S&P 500',    'data_source': 'yahoo', 'intraday_ticker': '^GSPC',    'spread_pct': 0.00009, 'point_size': 1.0, 'sector': 'US'},
-        'CTB': {'display': 'Dow Jones',  'data_source': 'yahoo', 'intraday_ticker': '^DJI',     'spread_pct': 0.00013, 'point_size': 1.0, 'sector': 'US'},
+        'UKX': {'display': 'FTSE 100',   'data_source': 'yahoo', 'intraday_ticker': '^FTSE',    'spread_pct': 0.00038, 'point_size': 1.0, 'sector': 'Europe', 'cfd_contract_size':  10.0, 'cfd_currency': 'GBP'},
+        'CBK': {'display': 'CAC 40',     'data_source': 'yahoo', 'intraday_ticker': '^FCHI',    'spread_pct': 0.00050, 'point_size': 1.0, 'sector': 'Europe', 'cfd_contract_size':  10.0, 'cfd_currency': 'EUR'},
+        'CEY': {'display': 'FTSE MIB',   'data_source': 'yahoo', 'intraday_ticker': None,       'spread_pct': 0.00135, 'point_size': 1.0, 'sector': 'Europe', 'cfd_contract_size':   5.0, 'cfd_currency': 'EUR'},
+        'CFR': {'display': 'DAX',        'data_source': 'yahoo', 'intraday_ticker': '^GDAXI',   'spread_pct': 0.00022, 'point_size': 1.0, 'sector': 'Europe', 'cfd_contract_size':  25.0, 'cfd_currency': 'EUR'},
+        'CMD': {'display': 'IBEX 35',    'data_source': 'yahoo', 'intraday_ticker': '^IBEX',    'spread_pct': 0.00055, 'point_size': 1.0, 'sector': 'Europe', 'cfd_contract_size':  10.0, 'cfd_currency': 'EUR'},
+        'CEI': {'display': 'STOXX 50',   'data_source': 'yahoo', 'intraday_ticker': '^STOXX50E','spread_pct': 0.00080, 'point_size': 1.0, 'sector': 'Europe', 'cfd_contract_size':  10.0, 'cfd_currency': 'EUR'},
+        'COI': {'display': 'SMI',        'data_source': 'yahoo', 'intraday_ticker': '^SSMI',    'spread_pct': 0.00042, 'point_size': 1.0, 'sector': 'Europe', 'cfd_contract_size':  10.0, 'cfd_currency': 'CHF'},
+        'CRM': {'display': 'HSI',        'data_source': 'yahoo', 'intraday_ticker': '^HSI',     'spread_pct': 0.00050, 'point_size': 1.0, 'sector': 'Asia',   'cfd_contract_size':  50.0, 'cfd_currency': 'HKD'},
+        'CIL': {'display': 'ASX 200',    'data_source': 'yahoo', 'intraday_ticker': '^AXJO',    'spread_pct': 0.00050, 'point_size': 1.0, 'sector': 'Asia',   'cfd_contract_size':  25.0, 'cfd_currency': 'AUD'},
+        'CPH': {'display': 'NASDAQ 100', 'data_source': 'yahoo', 'intraday_ticker': '^NDX',     'spread_pct': 0.00010, 'point_size': 1.0, 'sector': 'US',     'cfd_contract_size':  20.0, 'cfd_currency': 'USD'},
+        'CTN': {'display': 'S&P 500',    'data_source': 'yahoo', 'intraday_ticker': '^GSPC',    'spread_pct': 0.00009, 'point_size': 1.0, 'sector': 'US',     'cfd_contract_size':  50.0, 'cfd_currency': 'USD'},
+        'CTB': {'display': 'Dow Jones',  'data_source': 'yahoo', 'intraday_ticker': '^DJI',     'spread_pct': 0.00013, 'point_size': 1.0, 'sector': 'US',     'cfd_contract_size':   5.0, 'cfd_currency': 'USD'},
     },
 }
 
@@ -68,18 +68,18 @@ FX = {
         'USDCAD', 'EURGBP', 'EURJPY', 'GBPJPY', 'EURCHF', 'AUDNZD',
     ]},
     'instruments': {
-        'EURUSD': {'display': 'EUR/USD', 'data_source': 'csv', 'intraday_ticker': 'EURUSD=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10'},
-        'GBPUSD': {'display': 'GBP/USD', 'data_source': 'csv', 'intraday_ticker': 'GBPUSD=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10'},
-        'USDJPY': {'display': 'USD/JPY', 'data_source': 'csv', 'intraday_ticker': 'USDJPY=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10'},
-        'USDCHF': {'display': 'USD/CHF', 'data_source': 'csv', 'intraday_ticker': 'USDCHF=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10'},
-        'AUDUSD': {'display': 'AUD/USD', 'data_source': 'csv', 'intraday_ticker': 'AUDUSD=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10'},
-        'NZDUSD': {'display': 'NZD/USD', 'data_source': 'csv', 'intraday_ticker': 'NZDUSD=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10'},
-        'USDCAD': {'display': 'USD/CAD', 'data_source': 'csv', 'intraday_ticker': 'USDCAD=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10'},
-        'EURGBP': {'display': 'EUR/GBP', 'data_source': 'csv', 'intraday_ticker': 'EURGBP=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10'},
-        'EURJPY': {'display': 'EUR/JPY', 'data_source': 'csv', 'intraday_ticker': 'EURJPY=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10'},
-        'GBPJPY': {'display': 'GBP/JPY', 'data_source': 'csv', 'intraday_ticker': 'GBPJPY=X', 'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'G10'},
-        'EURCHF': {'display': 'EUR/CHF', 'data_source': 'csv', 'intraday_ticker': 'EURCHF=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10'},
-        'AUDNZD': {'display': 'AUD/NZD', 'data_source': 'csv', 'intraday_ticker': 'AUDNZD=X', 'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'G10'},
+        'EURUSD': {'display': 'EUR/USD', 'data_source': 'csv', 'intraday_ticker': 'EURUSD=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'USD'},
+        'GBPUSD': {'display': 'GBP/USD', 'data_source': 'csv', 'intraday_ticker': 'GBPUSD=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'USD'},
+        'USDJPY': {'display': 'USD/JPY', 'data_source': 'csv', 'intraday_ticker': 'USDJPY=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'JPY'},
+        'USDCHF': {'display': 'USD/CHF', 'data_source': 'csv', 'intraday_ticker': 'USDCHF=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'CHF'},
+        'AUDUSD': {'display': 'AUD/USD', 'data_source': 'csv', 'intraday_ticker': 'AUDUSD=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'USD'},
+        'NZDUSD': {'display': 'NZD/USD', 'data_source': 'csv', 'intraday_ticker': 'NZDUSD=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'USD'},
+        'USDCAD': {'display': 'USD/CAD', 'data_source': 'csv', 'intraday_ticker': 'USDCAD=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'CAD'},
+        'EURGBP': {'display': 'EUR/GBP', 'data_source': 'csv', 'intraday_ticker': 'EURGBP=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'GBP'},
+        'EURJPY': {'display': 'EUR/JPY', 'data_source': 'csv', 'intraday_ticker': 'EURJPY=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'JPY'},
+        'GBPJPY': {'display': 'GBP/JPY', 'data_source': 'csv', 'intraday_ticker': 'GBPJPY=X', 'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'JPY'},
+        'EURCHF': {'display': 'EUR/CHF', 'data_source': 'csv', 'intraday_ticker': 'EURCHF=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'CHF'},
+        'AUDNZD': {'display': 'AUD/NZD', 'data_source': 'csv', 'intraday_ticker': 'AUDNZD=X', 'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'NZD'},
     },
 }
 
@@ -103,22 +103,22 @@ COMMODITIES = {
     ]},
     'instruments': {
         # Energy
-        'WTI':       {'display': 'WTI Crude',    'data_source': 'csv', 'intraday_ticker': 'CL=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Energy'},
-        'BRENT':     {'display': 'Brent Crude',  'data_source': 'csv', 'intraday_ticker': 'BZ=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Energy'},
-        'NATGAS':    {'display': 'Natural Gas',  'data_source': 'csv', 'intraday_ticker': 'NG=F',  'spread_pct': 0.0020,  'point_size': 1.0, 'sector': 'Energy'},
+        'WTI':       {'display': 'WTI Crude',    'data_source': 'csv', 'intraday_ticker': 'CL=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Energy',      'cfd_contract_size':    1000.0, 'cfd_currency': 'USD'},
+        'BRENT':     {'display': 'Brent Crude',  'data_source': 'csv', 'intraday_ticker': 'BZ=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Energy',      'cfd_contract_size':    1000.0, 'cfd_currency': 'USD'},
+        'NATGAS':    {'display': 'Natural Gas',  'data_source': 'csv', 'intraday_ticker': 'NG=F',  'spread_pct': 0.0020,  'point_size': 1.0, 'sector': 'Energy',      'cfd_contract_size':   10000.0, 'cfd_currency': 'USD'},
         # Precious metals
-        'GOLD':      {'display': 'Gold',         'data_source': 'csv', 'intraday_ticker': 'GC=F',  'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'Precious'},
-        'SILVER':    {'display': 'Silver',       'data_source': 'csv', 'intraday_ticker': 'SI=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Precious'},
-        'PLATINUM':  {'display': 'Platinum',     'data_source': 'csv', 'intraday_ticker': 'PL=F',  'spread_pct': 0.0010,  'point_size': 1.0, 'sector': 'Precious'},
+        'GOLD':      {'display': 'Gold',         'data_source': 'csv', 'intraday_ticker': 'GC=F',  'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'Precious',    'cfd_contract_size':     100.0, 'cfd_currency': 'USD'},
+        'SILVER':    {'display': 'Silver',       'data_source': 'csv', 'intraday_ticker': 'SI=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Precious',    'cfd_contract_size':    5000.0, 'cfd_currency': 'USD'},
+        'PLATINUM':  {'display': 'Platinum',     'data_source': 'csv', 'intraday_ticker': 'PL=F',  'spread_pct': 0.0010,  'point_size': 1.0, 'sector': 'Precious',    'cfd_contract_size':      50.0, 'cfd_currency': 'USD'},
         # Industrial metals
-        'COPPER':    {'display': 'Copper',       'data_source': 'csv', 'intraday_ticker': 'HG=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Industrial'},
-        'PALLADIUM': {'display': 'Palladium',    'data_source': 'csv', 'intraday_ticker': 'PA=F',  'spread_pct': 0.0015,  'point_size': 1.0, 'sector': 'Industrial'},
+        'COPPER':    {'display': 'Copper',       'data_source': 'csv', 'intraday_ticker': 'HG=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Industrial',  'cfd_contract_size':   25000.0, 'cfd_currency': 'USD'},
+        'PALLADIUM': {'display': 'Palladium',    'data_source': 'csv', 'intraday_ticker': 'PA=F',  'spread_pct': 0.0015,  'point_size': 1.0, 'sector': 'Industrial',  'cfd_contract_size':     100.0, 'cfd_currency': 'USD'},
         # Agriculture
-        'WHEAT':     {'display': 'Wheat',        'data_source': 'csv', 'intraday_ticker': 'ZW=F',  'spread_pct': 0.0010,  'point_size': 1.0, 'sector': 'Agriculture'},
-        'CORN':      {'display': 'Corn',         'data_source': 'csv', 'intraday_ticker': 'ZC=F',  'spread_pct': 0.0008,  'point_size': 1.0, 'sector': 'Agriculture'},
-        'SOYBEANS':  {'display': 'Soybeans',     'data_source': 'csv', 'intraday_ticker': 'ZS=F',  'spread_pct': 0.0008,  'point_size': 1.0, 'sector': 'Agriculture'},
-        'COFFEE':    {'display': 'Coffee',       'data_source': 'csv', 'intraday_ticker': 'KC=F',  'spread_pct': 0.0012,  'point_size': 1.0, 'sector': 'Agriculture'},
-        'SUGAR':     {'display': 'Sugar',        'data_source': 'csv', 'intraday_ticker': 'SB=F',  'spread_pct': 0.0012,  'point_size': 1.0, 'sector': 'Agriculture'},
+        'WHEAT':     {'display': 'Wheat',        'data_source': 'csv', 'intraday_ticker': 'ZW=F',  'spread_pct': 0.0010,  'point_size': 1.0, 'sector': 'Agriculture', 'cfd_contract_size':    5000.0, 'cfd_currency': 'USD'},
+        'CORN':      {'display': 'Corn',         'data_source': 'csv', 'intraday_ticker': 'ZC=F',  'spread_pct': 0.0008,  'point_size': 1.0, 'sector': 'Agriculture', 'cfd_contract_size':    5000.0, 'cfd_currency': 'USD'},
+        'SOYBEANS':  {'display': 'Soybeans',     'data_source': 'csv', 'intraday_ticker': 'ZS=F',  'spread_pct': 0.0008,  'point_size': 1.0, 'sector': 'Agriculture', 'cfd_contract_size':    5000.0, 'cfd_currency': 'USD'},
+        'COFFEE':    {'display': 'Coffee',       'data_source': 'csv', 'intraday_ticker': 'KC=F',  'spread_pct': 0.0012,  'point_size': 1.0, 'sector': 'Agriculture', 'cfd_contract_size':   37500.0, 'cfd_currency': 'USD'},
+        'SUGAR':     {'display': 'Sugar',        'data_source': 'csv', 'intraday_ticker': 'SB=F',  'spread_pct': 0.0012,  'point_size': 1.0, 'sector': 'Agriculture', 'cfd_contract_size':  112000.0, 'cfd_currency': 'USD'},
     },
 }
 
@@ -146,22 +146,22 @@ FIXED_INCOME = {
     },
     'instruments': {
         # US duration ladder
-        'SHY':  {'display': 'US 1-3Y',          'data_source': 'csv', 'intraday_ticker': 'SHY',  'spread_pct': 0.0001, 'point_size': 1.0, 'sector': 'Short Duration'},
-        'IEI':  {'display': 'US 3-7Y',          'data_source': 'csv', 'intraday_ticker': 'IEI',  'spread_pct': 0.0001, 'point_size': 1.0, 'sector': 'Medium Duration'},
-        'IEF':  {'display': 'US 7-10Y',         'data_source': 'csv', 'intraday_ticker': 'IEF',  'spread_pct': 0.0001, 'point_size': 1.0, 'sector': 'Long Duration'},
-        'TLT':  {'display': 'US 20+Y',          'data_source': 'csv', 'intraday_ticker': 'TLT',  'spread_pct': 0.0002, 'point_size': 1.0, 'sector': 'Long Duration'},
+        'SHY':  {'display': 'US 1-3Y',          'data_source': 'csv', 'intraday_ticker': 'SHY',  'spread_pct': 0.0001, 'point_size': 1.0, 'sector': 'Short Duration',  'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
+        'IEI':  {'display': 'US 3-7Y',          'data_source': 'csv', 'intraday_ticker': 'IEI',  'spread_pct': 0.0001, 'point_size': 1.0, 'sector': 'Medium Duration', 'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
+        'IEF':  {'display': 'US 7-10Y',         'data_source': 'csv', 'intraday_ticker': 'IEF',  'spread_pct': 0.0001, 'point_size': 1.0, 'sector': 'Long Duration',   'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
+        'TLT':  {'display': 'US 20+Y',          'data_source': 'csv', 'intraday_ticker': 'TLT',  'spread_pct': 0.0002, 'point_size': 1.0, 'sector': 'Long Duration',   'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
         # US credit
-        'LQD':  {'display': 'US IG Corp',       'data_source': 'csv', 'intraday_ticker': 'LQD',  'spread_pct': 0.0002, 'point_size': 1.0, 'sector': 'Credit'},
-        'HYG':  {'display': 'US HY Corp',       'data_source': 'csv', 'intraday_ticker': 'HYG',  'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'Credit'},
+        'LQD':  {'display': 'US IG Corp',       'data_source': 'csv', 'intraday_ticker': 'LQD',  'spread_pct': 0.0002, 'point_size': 1.0, 'sector': 'Credit',          'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
+        'HYG':  {'display': 'US HY Corp',       'data_source': 'csv', 'intraday_ticker': 'HYG',  'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'Credit',          'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
         # US inflation
-        'TIP':  {'display': 'US TIPS',          'data_source': 'csv', 'intraday_ticker': 'TIP',  'spread_pct': 0.0002, 'point_size': 1.0, 'sector': 'Inflation'},
+        'TIP':  {'display': 'US TIPS',          'data_source': 'csv', 'intraday_ticker': 'TIP',  'spread_pct': 0.0002, 'point_size': 1.0, 'sector': 'Inflation',       'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
         # International
-        'BWX':  {'display': 'Intl Treasury',    'data_source': 'csv', 'intraday_ticker': 'BWX',  'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'International'},
-        'EMB':  {'display': 'EM Bonds',         'data_source': 'csv', 'intraday_ticker': 'EMB',  'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'International'},
+        'BWX':  {'display': 'Intl Treasury',    'data_source': 'csv', 'intraday_ticker': 'BWX',  'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'International',   'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
+        'EMB':  {'display': 'EM Bonds',         'data_source': 'csv', 'intraday_ticker': 'EMB',  'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'International',   'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
         # UK/Europe
-        'IGLT': {'display': 'UK Gilts',         'data_source': 'csv', 'intraday_ticker': 'IGLT', 'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'International'},
-        'IEAG': {'display': 'EUR Govt',         'data_source': 'csv', 'intraday_ticker': 'IEAG', 'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'International'},
-        'IBTM': {'display': 'US Trsy 7-10 (L)', 'data_source': 'csv', 'intraday_ticker': 'IBTM', 'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'Medium Duration'},
+        'IGLT': {'display': 'UK Gilts',         'data_source': 'csv', 'intraday_ticker': 'IGLT', 'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'International',   'cfd_contract_size': 1.0, 'cfd_currency': 'GBP'},
+        'IEAG': {'display': 'EUR Govt',         'data_source': 'csv', 'intraday_ticker': 'IEAG', 'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'International',   'cfd_contract_size': 1.0, 'cfd_currency': 'EUR'},
+        'IBTM': {'display': 'US Trsy 7-10 (L)', 'data_source': 'csv', 'intraday_ticker': 'IBTM', 'spread_pct': 0.0003, 'point_size': 1.0, 'sector': 'Medium Duration', 'cfd_contract_size': 1.0, 'cfd_currency': 'USD'},
     },
 }
 
@@ -283,6 +283,22 @@ def get_intraday_ticker(code: str) -> str | None:
             if isinstance(inst_cfg, dict):
                 return inst_cfg.get('intraday_ticker')
     return None
+
+
+def get_cfd_contract_size(code: str) -> tuple[float, str]:
+    """
+    Return (cfd_contract_size, cfd_currency) for an instrument code.
+    Falls back to (1.0, 'USD') if not found.
+    """
+    for cfg in ASSET_CLASSES.values():
+        if code in cfg.get('instruments', {}):
+            inst_cfg = cfg['instruments'][code]
+            if isinstance(inst_cfg, dict):
+                return (
+                    inst_cfg.get('cfd_contract_size', 1.0),
+                    inst_cfg.get('cfd_currency', 'USD'),
+                )
+    return (1.0, 'USD')
 
 
 def get_cross_asset_label(long_class: str, short_class: str) -> str:
