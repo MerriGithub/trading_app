@@ -445,34 +445,43 @@ def _render_results(sc_min_trades: int) -> None:
 
                 st.dataframe(_tbl_df, use_container_width=True, hide_index=True)
 
-                # ── "Add all" button ────────────────────────────────────────
-                if st.button("★ Add all visible to Watchlist", key=f'sc_add_all_{_bkt}'):
-                    _tw_raw = lambda r: int(str(r.get('Trend Window', '262d')).rstrip('d'))
-                    for _, _r in _bdf.iterrows():
-                        add_to_watchlist({
-                            'long':              str(_r['_long']),
-                            'short':             str(_r['_short']),
-                            'asset_class_long':  str(_r.get('_asset_class_long', '')),
-                            'asset_class_short': str(_r.get('_asset_class_short', '')),
-                            'entry_sd':          float(_r['Entry SD']),
-                            'exit_sd':           float(_r['Exit SD']),
-                            'vol_window':        int(_r['Vol Window']),
-                            'trend_window':      _tw_raw(_r),
-                            'trend_mode':        str(_r.get('_trend_mode', 'Both passes')),
-                            'source':            'tab10',
-                            'scan_metrics': {
-                                'trades_wt':  int(_r.get('Trades_WT', _r.get('Trades', 0))),
-                                'net_wr_wt':  float(_r.get('NetWR_WT', _r.get('Net WR%', 0)) or 0),
-                                'avg_net_wt': float(_r.get('AvgNet_WT', _r.get('Avg Net', 0)) or 0),
-                                'avg_hold_wt':int(_r.get('AvgHold_WT', _r.get('Avg Hold', 0)) or 0),
-                                'trades_ct':  int(_r.get('Trades_CT', 0)),
-                                'net_wr_ct':  float(_r.get('NetWR_CT', 0) or 0),
-                                'avg_net_ct': float(_r.get('AvgNet_CT', 0) or 0),
-                                'avg_hold_ct':int(_r.get('AvgHold_CT', 0) or 0),
-                                'best_dir':   str(_r.get('Best Dir', '')),
-                            },
-                        })
-                    st.toast(f"★ Added {len(_bdf)} pairs to watchlist")
+                # ── Send to Batch Walk-Forward (🟢 Short bucket only) ────────
+                if _bkt == '🟢 Short':
+                    if st.button(
+                        f"📐 Send {len(_bdf)} pairs to Walk-Forward →",
+                        key='sc_send_wf_green',
+                        type='primary',
+                    ):
+                        _tw_raw = lambda r: int(str(r.get('Trend Window', '262d')).rstrip('d'))
+                        _wf_batch = []
+                        for _, _r in _bdf.iterrows():
+                            _wf_batch.append({
+                                'long':              str(_r['_long']),
+                                'short':             str(_r['_short']),
+                                'asset_class_long':  str(_r.get('_asset_class_long', '')),
+                                'asset_class_short': str(_r.get('_asset_class_short', '')),
+                                'entry_sd':          float(_r['Entry SD']),
+                                'exit_sd':           float(_r['Exit SD']),
+                                'vol_window':        int(_r['Vol Window']),
+                                'trend_window':      _tw_raw(_r),
+                                'trend_mode':        str(_r.get('_trend_mode', 'Both passes')),
+                                'scan_metrics': {
+                                    'trades_wt':   int(_r.get('Trades_WT', _r.get('Trades', 0))),
+                                    'net_wr_wt':   float(_r.get('NetWR_WT', _r.get('Net WR%', 0)) or 0),
+                                    'avg_net_wt':  float(_r.get('AvgNet_WT', _r.get('Avg Net', 0)) or 0),
+                                    'avg_hold_wt': int(_r.get('AvgHold_WT', _r.get('Avg Hold', 0)) or 0),
+                                    'trades_ct':   int(_r.get('Trades_CT', 0)),
+                                    'net_wr_ct':   float(_r.get('NetWR_CT', 0) or 0),
+                                    'avg_net_ct':  float(_r.get('AvgNet_CT', 0) or 0),
+                                    'avg_hold_ct': int(_r.get('AvgHold_CT', 0) or 0),
+                                    'best_dir':    str(_r.get('Best Dir', '')),
+                                },
+                            })
+                        st.session_state['wf_batch'] = _wf_batch
+                        st.session_state['wf_batch_source'] = 'tab10_green'
+                        st.session_state.pop('wf_batch_results', None)
+                        st.session_state['sidebar_nav'] = "🔀 Walk-Forward"
+                        st.rerun()
 
                 # ── Per-row action area ──────────────────────────────────────
                 _pair_labels = [

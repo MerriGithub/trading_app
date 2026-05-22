@@ -12,15 +12,25 @@ from data_watchlist import (
 from tabs.tab11_walkforward import _run_wf
 
 
-def _wf_badge(eid: str, wf_cache: dict) -> str:
-    if eid not in wf_cache:
+def _get_wf_status(entry: dict, cache: dict) -> dict | None:
+    if entry.get('wf_metrics'):
+        return entry['wf_metrics']
+    return cache.get(entry['id'])
+
+
+def _wf_badge(eid: str, wf_cache: dict, wfs: dict | None = None) -> str:
+    if wfs is None:
+        wfs = wf_cache.get(eid)
+    if wfs is None:
         return "— Not run"
-    rec = wf_cache[eid].get('recommendation', '')
+    rec = wfs.get('recommendation', '')
     return {"Robust": "✅ Robust", "Moderate": "⚠️ Moderate"}.get(rec, "❌ Curve-fitted")
 
 
-def _wf_consistency(eid: str, wf_cache: dict) -> str:
-    v = wf_cache.get(eid, {}).get('consistency_score')
+def _wf_consistency(eid: str, wf_cache: dict, wfs: dict | None = None) -> str:
+    if wfs is None:
+        wfs = wf_cache.get(eid)
+    v = wfs.get('consistency_score') if wfs else None
     return f"{v:.2f}" if v is not None else "—"
 
 
@@ -82,12 +92,23 @@ def _compute_wf_summary(df: pd.DataFrame) -> dict:
     }
 
 
+_SOURCE_BADGES = {
+    'batch_wf': '📐 Batch WF',
+    'tab10':    '🔍 Manual',
+    'tab12':    '🔍 Manual',
+    'tab1':     '📊 Monitor',
+}
+
+
 def _build_table_df(entries: list, wf_cache: dict) -> pd.DataFrame:
     rows = []
     for e in entries:
-        sm = e.get('scan_metrics', {})
+        sm   = e.get('scan_metrics', {})
+        wfs  = _get_wf_status(e, wf_cache)
+        _cs  = wfs.get('consistency_score') if wfs else None
         rows.append({
             'id':           e['id'],
+            '_consist':     _cs if _cs is not None else -999.0,
             'Pair':         f"{e['long']} / {e['short']}",
             'Asset Classes':f"{e.get('asset_class_long', '?')} × {e.get('asset_class_short', '?')}",
             'Params':       f"E{e['entry_sd']} X{e['exit_sd']} V{e['vol_window']} T{e['trend_window']}",
@@ -96,17 +117,18 @@ def _build_table_df(entries: list, wf_cache: dict) -> pd.DataFrame:
             'WT Net WR':    f"{sm['net_wr_wt']:.1%}" if sm.get('net_wr_wt') is not None else '—',
             'WT Avg Net':   f"{sm['avg_net_wt']:+.4f}" if sm.get('avg_net_wt') is not None else '—',
             'WT Hold':      f"{sm.get('avg_hold_wt', '—')}d" if sm.get('avg_hold_wt') else '—',
-            'WF Status':    _wf_badge(e['id'], wf_cache),
-            'WF Consist.':  _wf_consistency(e['id'], wf_cache),
+            'WF Status':    _wf_badge(e['id'], wf_cache, wfs),
+            'WF Consist.':  _wf_consistency(e['id'], wf_cache, wfs),
+            'Source':       _SOURCE_BADGES.get(e.get('source', ''), e.get('source', '—') or '—'),
             'Added':        e.get('added', ''),
             'Notes':        (e.get('notes', '') or '')[:40],
         })
     df = pd.DataFrame(rows) if rows else pd.DataFrame(
-        columns=['id', 'Pair', 'Asset Classes', 'Params', 'Best Dir',
+        columns=['id', '_consist', 'Pair', 'Asset Classes', 'Params', 'Best Dir',
                  'WT Trades', 'WT Net WR', 'WT Avg Net', 'WT Hold',
-                 'WF Status', 'WF Consist.', 'Added', 'Notes']
+                 'WF Status', 'WF Consist.', 'Source', 'Added', 'Notes']
     )
-    return df.sort_values('Added', ascending=False).reset_index(drop=True) if not df.empty else df
+    return df.sort_values('_consist', ascending=False).reset_index(drop=True) if not df.empty else df
 
 
 def render() -> None:
@@ -156,7 +178,7 @@ def render() -> None:
         if _search:
             if _search not in e.get('long', '').upper() and _search not in e.get('short', '').upper():
                 return False
-        if _wf_only and e['id'] not in wf_cache:
+        if _wf_only and _get_wf_status(e, wf_cache) is None:
             return False
         return True
 
@@ -165,13 +187,13 @@ def render() -> None:
     # ── Table ─────────────────────────────────────────────────────────────────
     tbl_df = _build_table_df(filtered, wf_cache)
     st.dataframe(
-        tbl_df.drop(columns=['id']),
+        tbl_df.drop(columns=['id', '_consist']),
         use_container_width=True,
         hide_index=True,
     )
 
     # CSV export
-    _export_cols = [c for c in tbl_df.columns if c != 'id']
+    _export_cols = [c for c in tbl_df.columns if c not in ('id', '_consist')]
     _csv = tbl_df[_export_cols].to_csv(index=False).encode('utf-8')
     st.download_button(
         "⬇ Export CSV", _csv,
@@ -198,13 +220,14 @@ def render() -> None:
 
     # ── Detail panel ─────────────────────────────────────────────────────────
     with st.container(border=True):
-        sm = entry.get('scan_metrics', {})
+        sm   = entry.get('scan_metrics', {})
+        _wfs = _get_wf_status(entry, wf_cache)
         d1, d2, d3, d4, d5 = st.columns(5)
         d1.metric("Pair",       f"{entry['long']} / {entry['short']}")
         d2.metric("Best Dir",   sm.get('best_dir', '—'))
         d3.metric("WT Trades",  sm.get('trades_wt', '—'))
         d4.metric("WT Avg Net", f"{sm['avg_net_wt']:+.4f}" if sm.get('avg_net_wt') is not None else '—')
-        d5.metric("WF Status",  _wf_badge(entry['id'], wf_cache))
+        d5.metric("WF Status",  _wf_badge(entry['id'], wf_cache, _wfs))
 
         st.caption(
             f"**Params:** Entry {entry['entry_sd']} | Exit {entry['exit_sd']} | "

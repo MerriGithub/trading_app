@@ -199,6 +199,80 @@ def _run_wf(
     return pd.DataFrame(rows), None
 
 
+def _wf_summary(df: pd.DataFrame) -> dict:
+    n_windows  = len(df)
+    stable_pct = float((df['Stable?'] == '✅').sum() / n_windows * 100) if n_windows > 0 else 0.0
+
+    an_vals = df['_oos_an'].replace([np.inf, -np.inf], np.nan).dropna()
+    nr_vals = df['_oos_nr'].replace([np.inf, -np.inf], np.nan).dropna()
+    avg_oos_net = float(an_vals.mean()) if len(an_vals) > 0 else None
+    avg_oos_wr  = float(nr_vals.mean()) if len(nr_vals) > 0 else None
+
+    consistency_score = None
+    valid_both = df[['_is_an', '_oos_an']].replace([np.inf, -np.inf], np.nan).dropna()
+    if len(valid_both) >= 3:
+        try:
+            from scipy.stats import spearmanr
+            r, _ = spearmanr(valid_both['_is_an'].values, valid_both['_oos_an'].values)
+            consistency_score = float(r)
+        except Exception:
+            pass
+
+    if stable_pct >= 75:
+        recommendation = "Robust"
+    elif stable_pct >= 50:
+        recommendation = "Moderate"
+    else:
+        recommendation = "Curve-fitted"
+
+    windows_data = []
+    for _, row in df.iterrows():
+        def _safe(v):
+            try:
+                return None if (v is None or (isinstance(v, float) and np.isnan(v))) else v
+            except Exception:
+                return v
+        windows_data.append({
+            'Window':       int(row['Window']),
+            'IS Period':    str(row['IS Period']),
+            'OOS Period':   str(row['OOS Period']),
+            'IS Net WR':    _safe(row.get('IS Net WR')),
+            'IS Avg Net':   _safe(row.get('IS Avg Net')),
+            'OOS Net WR':   _safe(row.get('OOS Net WR')),
+            'OOS Avg Net':  _safe(row.get('OOS Avg Net')),
+            'OOS Avg Hold': _safe(row.get('OOS Avg Hold')),
+            'IS Trades':    int(row.get('IS Trades', 0) or 0),
+            'OOS Trades':   int(row.get('OOS Trades', 0) or 0),
+            'Stable':       str(row.get('Stable?', '')),
+        })
+
+    return {
+        'stable_pct':        stable_pct,
+        'avg_oos_net':       avg_oos_net,
+        'avg_oos_wr':        avg_oos_wr,
+        'consistency_score': consistency_score,
+        'recommendation':    recommendation,
+        'n_windows':         n_windows,
+        'windows':           windows_data,
+    }
+
+
+def _batch_result_to_watchlist_entry(r: dict) -> dict:
+    return {
+        'long':              r['long'],
+        'short':             r['short'],
+        'asset_class_long':  r.get('asset_class_long', ''),
+        'asset_class_short': r.get('asset_class_short', ''),
+        'entry_sd':          r['entry_sd'],
+        'exit_sd':           r['exit_sd'],
+        'vol_window':        r['vol_window'],
+        'trend_window':      r['trend_window'],
+        'trend_mode':        r['trend_mode'],
+        'source':            'batch_wf',
+        'scan_metrics':      r.get('scan_metrics', {}),
+    }
+
+
 def render() -> None:
     st.header("Walk-Forward Analysis")
     st.caption("Rolling IS/OOS validation. Tests whether a pair + parameters are robust or curve-fitted.")
@@ -277,75 +351,200 @@ def render() -> None:
                 }
 
     cache = st.session_state.get('wf11_results')
-    if cache is None:
+    if cache is not None:
+        df     = cache['df']
+        _long  = cache['long']
+        _short = cache['short']
+        _parms = cache['params']
+
+        if df.empty:
+            st.warning("No valid windows computed.")
+        else:
+            # ── Summary ───────────────────────────────────────────────────────
+            n_win    = len(df)
+            n_stable = int((df['Stable?'] == '✅').sum())
+
+            _common = df[['_is_an', '_oos_an']].replace([np.inf, -np.inf], np.nan).dropna()
+            _is_mean  = float(_common['_is_an'].mean())  if not _common.empty else float('nan')
+            _oos_mean = float(_common['_oos_an'].mean()) if not _common.empty else float('nan')
+            _consistency = (_oos_mean / _is_mean) if (not np.isnan(_is_mean) and _is_mean != 0) else float('nan')
+            _avg_oos_nr  = float(df['_oos_nr'].replace([np.inf, -np.inf], np.nan).dropna().mean())
+
+            st.subheader("Stability Summary")
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Stable windows",    f"{n_stable} / {n_win} ({n_stable/n_win:.0%})")
+            s2.metric("Avg OOS net exp",   f"{_oos_mean:+.3%}" if not np.isnan(_oos_mean) else "N/A")
+            s3.metric("Avg OOS net WR",    f"{_avg_oos_nr:.1%}" if not np.isnan(_avg_oos_nr) else "N/A")
+            s4.metric("Consistency score", f"{_consistency:.2f}" if not np.isnan(_consistency) else "N/A")
+
+            _spct = n_stable / n_win
+            if not np.isnan(_consistency) and _consistency >= 0.7 and _spct >= 0.7:
+                st.success("✅ **Robust** — suitable for live trading (consistency ≥ 0.7, stable ≥ 70%)")
+            elif (not np.isnan(_consistency) and _consistency >= 0.4) or _spct >= 0.5:
+                st.warning("⚠️ **Moderate** — monitor closely")
+            else:
+                st.error("❌ **Curve-fitted** — do not trade live")
+
+            # ── Window table ──────────────────────────────────────────────────
+            st.subheader("Window Results")
+            _disp = df[['Window', 'IS Period', 'OOS Period',
+                        'IS Net WR', 'IS Avg Net', 'OOS Net WR', 'OOS Avg Net',
+                        'OOS Avg Hold', 'IS Trades', 'OOS Trades', 'Stable?']].copy()
+
+            for _c in ['IS Net WR', 'OOS Net WR']:
+                _disp[_c] = _disp[_c].apply(
+                    lambda v: f'{v:.1%}' if not (isinstance(v, float) and np.isnan(v)) else '—'
+                )
+            for _c in ['IS Avg Net', 'OOS Avg Net']:
+                _disp[_c] = _disp[_c].apply(
+                    lambda v: f'{v:+.3%}' if not (isinstance(v, float) and np.isnan(v)) else '—'
+                )
+            _disp['OOS Avg Hold'] = _disp['OOS Avg Hold'].apply(
+                lambda v: f'{v:.0f}d' if not (isinstance(v, float) and np.isnan(v)) else '—'
+            )
+            _tbl(_disp, show_index=False)
+
+            # ── IS vs OOS chart ───────────────────────────────────────────────
+            _chart = df[['Window', '_is_an', '_oos_an']].replace([np.inf, -np.inf], np.nan).dropna()
+            if not _chart.empty:
+                st.subheader("IS vs OOS Net Expectancy")
+                _fig = go.Figure()
+                _fig.add_trace(go.Scatter(
+                    x=_chart['Window'], y=(_chart['_is_an'] * 100),
+                    name='IS Avg Net (%)', line=dict(color='#2c6fad'),
+                ))
+                _fig.add_trace(go.Scatter(
+                    x=_chart['Window'], y=(_chart['_oos_an'] * 100),
+                    name='OOS Avg Net (%)', line=dict(color='#e67e22'),
+                ))
+                _fig.add_hline(y=0, line_dash='dash', line_color='gray')
+                _fig.update_layout(
+                    title=f"{' + '.join(_long)} / {' + '.join(_short)}",
+                    xaxis_title='Window', yaxis_title='Avg Net Expectancy (%)',
+                    height=350, margin=dict(l=0, r=0, t=40, b=0),
+                )
+                st.plotly_chart(_fig, use_container_width=True)
+
+    # ── Batch Walk-Forward ────────────────────────────────────────────────────
+    _batch = st.session_state.get('wf_batch')
+    if not _batch:
         return
 
-    df     = cache['df']
-    _long  = cache['long']
-    _short = cache['short']
-    _parms = cache['params']
-
-    if df.empty:
-        st.warning("No valid windows computed.")
-        return
-
-    # ── Summary ───────────────────────────────────────────────────────────────
-    n_win    = len(df)
-    n_stable = int((df['Stable?'] == '✅').sum())
-
-    _common = df[['_is_an', '_oos_an']].replace([np.inf, -np.inf], np.nan).dropna()
-    _is_mean = float(_common['_is_an'].mean()) if not _common.empty else float('nan')
-    _oos_mean = float(_common['_oos_an'].mean()) if not _common.empty else float('nan')
-    _consistency = (_oos_mean / _is_mean) if (not np.isnan(_is_mean) and _is_mean != 0) else float('nan')
-    _avg_oos_nr = float(df['_oos_nr'].replace([np.inf, -np.inf], np.nan).dropna().mean())
-
-    st.subheader("Stability Summary")
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Stable windows",    f"{n_stable} / {n_win} ({n_stable/n_win:.0%})")
-    s2.metric("Avg OOS net exp",   f"{_oos_mean:+.3%}" if not np.isnan(_oos_mean) else "N/A")
-    s3.metric("Avg OOS net WR",    f"{_avg_oos_nr:.1%}" if not np.isnan(_avg_oos_nr) else "N/A")
-    s4.metric("Consistency score", f"{_consistency:.2f}" if not np.isnan(_consistency) else "N/A")
-
-    _spct = n_stable / n_win
-    if not np.isnan(_consistency) and _consistency >= 0.7 and _spct >= 0.7:
-        st.success("✅ **Robust** — suitable for live trading (consistency ≥ 0.7, stable ≥ 70%)")
-    elif (not np.isnan(_consistency) and _consistency >= 0.4) or _spct >= 0.5:
-        st.warning("⚠️ **Moderate** — monitor closely")
-    else:
-        st.error("❌ **Curve-fitted** — do not trade live")
-
-    # ── Window table ──────────────────────────────────────────────────────────
-    st.subheader("Window Results")
-    _disp = df[['Window', 'IS Period', 'OOS Period',
-                'IS Net WR', 'IS Avg Net', 'OOS Net WR', 'OOS Avg Net',
-                'OOS Avg Hold', 'IS Trades', 'OOS Trades', 'Stable?']].copy()
-
-    for _c in ['IS Net WR', 'OOS Net WR']:
-        _disp[_c] = _disp[_c].apply(lambda v: f'{v:.1%}' if not (isinstance(v, float) and np.isnan(v)) else '—')
-    for _c in ['IS Avg Net', 'OOS Avg Net']:
-        _disp[_c] = _disp[_c].apply(lambda v: f'{v:+.3%}' if not (isinstance(v, float) and np.isnan(v)) else '—')
-    _disp['OOS Avg Hold'] = _disp['OOS Avg Hold'].apply(
-        lambda v: f'{v:.0f}d' if not (isinstance(v, float) and np.isnan(v)) else '—'
+    st.divider()
+    st.subheader("Batch Walk-Forward")
+    _src_label = st.session_state.get('wf_batch_source', '')
+    st.caption(
+        f"**{len(_batch)} pairs** from "
+        f"{'🎯 Scenario Scanner (🟢 Short bucket)' if _src_label == 'tab10_green' else _src_label}"
     )
-    _tbl(_disp, show_index=False)
 
-    # ── IS vs OOS chart ───────────────────────────────────────────────────────
-    _chart = df[['Window', '_is_an', '_oos_an']].replace([np.inf, -np.inf], np.nan).dropna()
-    if not _chart.empty:
-        st.subheader("IS vs OOS Net Expectancy")
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_chart['Window'], y=(_chart['_is_an'] * 100),
-            name='IS Avg Net (%)', line=dict(color='#2c6fad'),
-        ))
-        _fig.add_trace(go.Scatter(
-            x=_chart['Window'], y=(_chart['_oos_an'] * 100),
-            name='OOS Avg Net (%)', line=dict(color='#e67e22'),
-        ))
-        _fig.add_hline(y=0, line_dash='dash', line_color='gray')
-        _fig.update_layout(
-            title=f"{' + '.join(_long)} / {' + '.join(_short)}",
-            xaxis_title='Window', yaxis_title='Avg Net Expectancy (%)',
-            height=350, margin=dict(l=0, r=0, t=40, b=0),
+    _bw1, _bw2, _bw3, _bw4 = st.columns(4)
+    _b_is     = int(_bw1.number_input("In-sample (days)",      252, 2520,  756, key='wfb_is'))
+    _b_oos    = int(_bw2.number_input("Out-of-sample (days)",   63,  756,  252, key='wfb_oos'))
+    _b_step   = int(_bw3.number_input("Step size (days)",       63,  756,  252, key='wfb_step'))
+    _b_broker = _bw4.selectbox(
+        "Broker",
+        ["ig_spreadbet", "ig_cfd"],
+        format_func=lambda x: {"ig_spreadbet": "IG Spread Bet", "ig_cfd": "IG CFD"}[x],
+        key='wfb_broker',
+    )
+
+    _run_batch = st.button(
+        "▶ Run Batch Walk-Forward", type="primary", use_container_width=True, key='wfb_run',
+    )
+
+    if _run_batch:
+        _results = []
+        _prog = st.progress(0.0)
+        _stat = st.empty()
+        for _i, _p in enumerate(_batch):
+            _stat.caption(f"Running {_i + 1}/{len(_batch)}: {_p['long']} / {_p['short']}")
+            try:
+                _wf_df, _wf_err = _run_wf(
+                    long_legs  = [_p['long']],
+                    short_legs = [_p['short']],
+                    vol_window = _p['vol_window'],
+                    xing_sd    = _p['entry_sd'],
+                    exit_sd    = _p['exit_sd'],
+                    trend_win  = _p['trend_window'],
+                    trend_mode = _p['trend_mode'],
+                    is_days    = _b_is,
+                    oos_days   = _b_oos,
+                    step_days  = _b_step,
+                    broker     = _b_broker,
+                )
+                if _wf_err or _wf_df is None:
+                    _summary = {
+                        'recommendation': 'Error', 'stable_pct': 0.0,
+                        'avg_oos_net': None, 'avg_oos_wr': None,
+                        'consistency_score': None, 'n_windows': 0, 'windows': [],
+                        'error': _wf_err or 'No data',
+                    }
+                else:
+                    _summary = _wf_summary(_wf_df)
+            except Exception as _ex:
+                _summary = {
+                    'recommendation': 'Error', 'stable_pct': 0.0,
+                    'avg_oos_net': None, 'avg_oos_wr': None,
+                    'consistency_score': None, 'n_windows': 0, 'windows': [],
+                    'error': str(_ex),
+                }
+            _results.append({**_p, 'wf_metrics': _summary})
+            _prog.progress((_i + 1) / len(_batch))
+        _prog.progress(1.0)
+        _stat.empty()
+        _results.sort(
+            key=lambda r: (
+                r['wf_metrics'].get('consistency_score') is None,
+                -(r['wf_metrics'].get('consistency_score') or 0),
+            ),
         )
-        st.plotly_chart(_fig, use_container_width=True)
+        st.session_state['wf_batch_results'] = _results
+
+    _br = st.session_state.get('wf_batch_results')
+    if not _br:
+        return
+
+    _tbl_rows = []
+    for _r in _br:
+        _m   = _r['wf_metrics']
+        _err = _m.get('error', '')
+        _tbl_rows.append({
+            'Pair':        f"{_r['long']} / {_r['short']}",
+            'Entry SD':    _r['entry_sd'],
+            'Exit SD':     _r['exit_sd'],
+            'Vol':         _r['vol_window'],
+            'Trend Win':   _r['trend_window'],
+            'Stable %':    f"{_m['stable_pct']:.0f}%" if not _err else '—',
+            'Avg OOS Net': f"{_m['avg_oos_net']:+.4f}" if _m.get('avg_oos_net') is not None else '—',
+            'Consistency': f"{_m['consistency_score']:.2f}" if _m.get('consistency_score') is not None else '—',
+            'Verdict':     _m.get('recommendation', '—') + (f" ⚠️ {_err}" if _err else ''),
+        })
+    st.dataframe(pd.DataFrame(_tbl_rows), use_container_width=True, hide_index=True)
+
+    _robust     = [r for r in _br if r['wf_metrics'].get('recommendation') == 'Robust']
+    _robust_mod = [r for r in _br if r['wf_metrics'].get('recommendation') in ('Robust', 'Moderate')]
+
+    ba1, ba2, ba3 = st.columns(3)
+    if ba1.button(f"★ Add all Robust ({len(_robust)})", key='wfb_add_robust',
+                  disabled=not _robust):
+        from data_watchlist import add_to_watchlist, save_wf_result
+        for _r in _robust:
+            _eid = add_to_watchlist(_batch_result_to_watchlist_entry(_r))
+            save_wf_result(_eid, _r['wf_metrics'])
+        st.toast(f"★ Added {len(_robust)} Robust pairs to watchlist")
+        st.rerun()
+
+    if ba2.button(f"★ Add Robust + Moderate ({len(_robust_mod)})", key='wfb_add_mod',
+                  disabled=not _robust_mod):
+        from data_watchlist import add_to_watchlist, save_wf_result
+        for _r in _robust_mod:
+            _eid = add_to_watchlist(_batch_result_to_watchlist_entry(_r))
+            save_wf_result(_eid, _r['wf_metrics'])
+        st.toast(f"★ Added {len(_robust_mod)} pairs to watchlist")
+        st.rerun()
+
+    if ba3.button("🗑️ Clear batch results", key='wfb_clear'):
+        st.session_state.pop('wf_batch_results', None)
+        st.session_state.pop('wf_batch', None)
+        st.rerun()
