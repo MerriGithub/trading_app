@@ -96,18 +96,56 @@ _SOURCE_BADGES = {
 }
 
 
+def _best_params_per_pair(entries: list) -> list:
+    """
+    Return one entry per (long, short) pair — the one with the best parameter set.
+
+    Ranking priority (descending):
+      1. consistency_score  — primary WF stability measure
+      2. avg_net_wt         — scan-side avg net return per trade
+      3. trades_wt          — sample size tiebreaker
+
+    Returns a new list; originals are not mutated.
+    Each returned entry gets a '_n_param_sets' key showing how many were collapsed.
+    """
+    def _sort_key(e):
+        wfm = e.get('wf_metrics') or {}
+        sm  = e.get('scan_metrics') or {}
+        return (
+            wfm.get('consistency_score') if wfm.get('consistency_score') is not None else -999,
+            sm.get('avg_net_wt')         if sm.get('avg_net_wt')         is not None else -999,
+            sm.get('trades_wt')          if sm.get('trades_wt')          is not None else 0,
+        )
+
+    pair_groups: dict[tuple, list] = {}
+    for e in entries:
+        key = (e.get('long', ''), e.get('short', ''))
+        pair_groups.setdefault(key, []).append(e)
+
+    result = []
+    for group in pair_groups.values():
+        best = dict(max(group, key=_sort_key))   # shallow copy — never mutates original
+        best['_n_param_sets'] = len(group)
+        result.append(best)
+    return result
+
+
 def _build_table_df(entries: list, wf_cache: dict) -> pd.DataFrame:
     rows = []
     for e in entries:
         sm = e.get('scan_metrics', {})
         _wf_status, _wf_score = _get_wf_status(e, wf_cache)
         _cs_num = float(_wf_score) if _wf_score != '—' else -999.0
+        _n   = e.get('_n_param_sets', 1)
+        _par = f"E{e['entry_sd']} X{e['exit_sd']} V{e['vol_window']} T{e['trend_window']}"
+        if _n > 1:
+            _par += f" (best of {_n})"
         rows.append({
             'id':           e['id'],
             '_consist':     _cs_num,
             'Pair':         f"{e['long']} / {e['short']}",
             'Asset Classes':f"{e.get('asset_class_long', '?')} × {e.get('asset_class_short', '?')}",
-            'Params':       f"E{e['entry_sd']} X{e['exit_sd']} V{e['vol_window']} T{e['trend_window']}",
+            'Params':       _par,
             'Best Dir':     sm.get('best_dir', '—'),
             'WT Trades':    sm.get('trades_wt', '—'),
             'WT Net WR':    f"{sm['net_wr_wt']:.1%}" if sm.get('net_wr_wt') is not None else '—',
@@ -144,19 +182,28 @@ def render() -> None:
         return
 
     # ── Filters ───────────────────────────────────────────────────────────────
-    fc1, fc2, fc3, fc4 = st.columns(4)
+    fc1, fc2, fc3, fc4, fc5 = st.columns(5)
 
     _all_ac = sorted({e.get('asset_class_long', '') for e in entries}
                      | {e.get('asset_class_short', '') for e in entries}
                      if entries else set())
-    _ac_filter = fc1.selectbox("Asset class", ["All"] + _all_ac, key="wl_f_ac")
+    _ac_filter  = fc1.selectbox("Asset class", ["All"] + _all_ac, key="wl_f_ac")
 
-    _dir_opts  = ["All", "WT", "CT", "Both", "Neither", "— Not run"]
+    _dir_opts   = ["All", "WT", "CT", "Both", "Neither", "— Not run"]
     _dir_filter = fc2.selectbox("Best direction", _dir_opts, key="wl_f_dir")
 
-    _search = fc3.text_input("Instrument search", key="wl_f_search").strip().upper()
-
+    _search  = fc3.text_input("Instrument search", key="wl_f_search").strip().upper()
     _wf_only = fc4.checkbox("Only WF-verified", key="wl_f_wf")
+    _dedup   = fc5.checkbox(
+        "Best params only",
+        value=False,
+        key="tab12_dedup",
+        help=(
+            "Collapses multiple parameter sets for the same pair to a single row — "
+            "the one with the highest consistency score, then highest avg net WT. "
+            "Raw entries are never deleted."
+        ),
+    )
 
     # Apply filters
     def _passes(e: dict) -> bool:
@@ -179,6 +226,21 @@ def render() -> None:
         return True
 
     filtered = [e for e in entries if _passes(e)]
+
+    # Deduplication — applied after other filters, before rendering
+    if _dedup and filtered:
+        _n_total_filtered = len(filtered)
+        filtered = _best_params_per_pair(filtered)
+        filtered.sort(
+            key=lambda x: (x.get('wf_metrics') or {}).get('consistency_score') or -999,
+            reverse=True,
+        )
+        _n_collapsed = _n_total_filtered - len(filtered)
+        st.info(
+            f"**Best params view:** {len(filtered)} unique pairs "
+            f"({_n_collapsed} duplicate param set{'s' if _n_collapsed != 1 else ''} hidden). "
+            f"Uncheck 'Best params only' to see all {_n_total_filtered} entries."
+        )
 
     # ── Table ─────────────────────────────────────────────────────────────────
     tbl_df = _build_table_df(filtered, wf_cache)
@@ -230,6 +292,44 @@ def render() -> None:
             f"Vol {entry['vol_window']}d | Trend {entry['trend_window']}d | "
             f"Mode: {entry.get('trend_mode', '—')} | Added: {entry.get('added', '—')}"
         )
+
+        # ── All param sets expander (dedup mode only) ─────────────────────────
+        if _dedup:
+            _all_for_pair = [
+                e for e in entries
+                if e.get('long') == entry['long'] and e.get('short') == entry['short']
+            ]
+            if len(_all_for_pair) > 1:
+                with st.expander(
+                    f"📊 All {len(_all_for_pair)} parameter sets for "
+                    f"{entry['long']}/{entry['short']}",
+                    expanded=False,
+                ):
+                    _alt_rows = []
+                    for _e in sorted(
+                        _all_for_pair,
+                        key=lambda x: (x.get('wf_metrics') or {}).get('consistency_score') or -999,
+                        reverse=True,
+                    ):
+                        _wfm = _e.get('wf_metrics') or {}
+                        _sm  = _e.get('scan_metrics') or {}
+                        _alt_rows.append({
+                            '★':           '← best' if _e.get('id') == entry.get('id') else '',
+                            'Entry SD':    _e['entry_sd'],
+                            'Exit SD':     _e['exit_sd'],
+                            'Vol Window':  _e['vol_window'],
+                            'Trend Mode':  _e['trend_mode'],
+                            'Consistency': f"{_wfm['consistency_score']:.2f}" if _wfm.get('consistency_score') is not None else '—',
+                            'WF Status':   _wfm.get('recommendation', '—'),
+                            'Trades WT':   _sm.get('trades_wt', '—'),
+                            'Avg Net WT':  f"{_sm['avg_net_wt']*100:.2f}%" if _sm.get('avg_net_wt') is not None else '—',
+                            'Hold WT':     f"{_sm['avg_hold_wt']}d" if _sm.get('avg_hold_wt') is not None else '—',
+                        })
+                    st.dataframe(pd.DataFrame(_alt_rows), use_container_width=True, hide_index=True)
+                    st.caption(
+                        "Action buttons use the best-params entry shown in the main table. "
+                        "To act on a different param set, uncheck 'Best params only' and select that row."
+                    )
 
         # ── Action buttons ────────────────────────────────────────────────────
         ab1, ab2, ab3 = st.columns(3)
