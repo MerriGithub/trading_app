@@ -54,6 +54,9 @@ _TABS = [
     "🗂️ Watchlist",
 ]
 
+if 'sidebar_nav_pending' in st.session_state:
+    st.session_state['sidebar_nav'] = st.session_state.pop('sidebar_nav_pending')
+
 with st.sidebar:
     st.markdown("## 📡 Spread Trading")
     st.markdown("---")

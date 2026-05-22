@@ -62,7 +62,7 @@ def render() -> None:
                     'short':  list(pos.basket.short_legs),
                     'source': 'tab1',
                 }
-                st.session_state['sidebar_nav'] = "📈 Pair Analysis"
+                st.session_state['sidebar_nav_pending'] = "📈 Pair Analysis"
                 st.rerun()
             if _bc2.button("Validate in Walk-Forward →", key=f"wf_{pos.id}"):
                 st.session_state['wf_pair'] = {
@@ -70,5 +70,5 @@ def render() -> None:
                     'short':  list(pos.basket.short_legs),
                     'source': 'tab1',
                 }
-                st.session_state['sidebar_nav'] = "🔀 Walk-Forward"
+                st.session_state['sidebar_nav_pending'] = "🔀 Walk-Forward"
                 st.rerun()

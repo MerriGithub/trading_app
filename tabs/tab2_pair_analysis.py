@@ -393,7 +393,7 @@ def render() -> None:
                         'trend_mode':    'Both passes',
                         'source':        'tab2',
                     }
-                    st.session_state['sidebar_nav'] = "🔀 Walk-Forward"
+                    st.session_state['sidebar_nav_pending'] = "🔀 Walk-Forward"
                     st.rerun()
 
     except Exception as e:

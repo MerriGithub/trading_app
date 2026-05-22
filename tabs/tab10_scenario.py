@@ -480,7 +480,7 @@ def _render_results(sc_min_trades: int) -> None:
                         st.session_state['wf_batch'] = _wf_batch
                         st.session_state['wf_batch_source'] = 'tab10_green'
                         st.session_state.pop('wf_batch_results', None)
-                        st.session_state['sidebar_nav'] = "🔀 Walk-Forward"
+                        st.session_state['sidebar_nav_pending'] = "🔀 Walk-Forward"
                         st.rerun()
 
                 # ── Per-row action area ──────────────────────────────────────
@@ -522,7 +522,7 @@ def _render_results(sc_min_trades: int) -> None:
                             'asset_class_short': str(_row.get('_asset_class_short', '')),
                             'source':            'tab10',
                         }
-                        st.session_state['sidebar_nav'] = "📈 Pair Analysis"
+                        st.session_state['sidebar_nav_pending'] = "📈 Pair Analysis"
                         st.rerun()
 
                     if _act2.button("★ Add to Watchlist", key=f'sc_wl_{_bkt}'):

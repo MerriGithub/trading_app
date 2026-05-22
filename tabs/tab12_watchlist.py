@@ -246,13 +246,13 @@ def render() -> None:
             st.session_state['pa_xing']          = entry['entry_sd']
             st.session_state['pa_exit']          = entry['exit_sd']
             st.session_state['pa_trend_window']  = entry['trend_window']
-            st.session_state['sidebar_nav']      = "📈 Pair Analysis"
+            st.session_state['sidebar_nav_pending']      = "📈 Pair Analysis"
             st.rerun()
 
         if ab2.button("→ Stake Calc", key=f"wl_to_sc_{entry['id']}"):
             st.session_state['sc_long_pending']  = [entry['long']]
             st.session_state['sc_short_pending'] = [entry['short']]
-            st.session_state['sidebar_nav']      = "🧮 Stake Calc"
+            st.session_state['sidebar_nav_pending']      = "🧮 Stake Calc"
             st.rerun()
 
         if ab3.button("→ Walk-Forward", key=f"wl_to_wf_{entry['id']}"):
@@ -270,7 +270,7 @@ def render() -> None:
             }
             st.session_state['wf11_long_pending']  = [entry['long']]
             st.session_state['wf11_short_pending'] = [entry['short']]
-            st.session_state['sidebar_nav']        = "🔀 Walk-Forward"
+            st.session_state['sidebar_nav_pending']        = "🔀 Walk-Forward"
             st.rerun()
 
         # ── Inline Walk-Forward ───────────────────────────────────────────────
