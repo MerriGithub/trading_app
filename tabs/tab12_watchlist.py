@@ -12,26 +12,22 @@ from data_watchlist import (
 from tabs.tab11_walkforward import _run_wf
 
 
-def _get_wf_status(entry: dict, cache: dict) -> dict | None:
-    if entry.get('wf_metrics'):
-        return entry['wf_metrics']
-    return cache.get(entry['id'])
+_WF_ICONS = {
+    'Robust':       '✅ Robust',
+    'Moderate':     '⚠️ Moderate',
+    'Curve-fitted': '❌ Curve-fitted',
+}
 
 
-def _wf_badge(eid: str, wf_cache: dict, wfs: dict | None = None) -> str:
-    if wfs is None:
-        wfs = wf_cache.get(eid)
-    if wfs is None:
-        return "— Not run"
-    rec = wfs.get('recommendation', '')
-    return {"Robust": "✅ Robust", "Moderate": "⚠️ Moderate"}.get(rec, "❌ Curve-fitted")
-
-
-def _wf_consistency(eid: str, wf_cache: dict, wfs: dict | None = None) -> str:
-    if wfs is None:
-        wfs = wf_cache.get(eid)
-    v = wfs.get('consistency_score') if wfs else None
-    return f"{v:.2f}" if v is not None else "—"
+def _get_wf_status(entry: dict, cache: dict) -> tuple[str, str]:
+    """Returns (status_str, score_str). Prefers embedded wf_metrics over cache."""
+    wfm   = entry.get('wf_metrics') or cache.get(entry.get('id', ''), {})
+    rec   = wfm.get('recommendation')   if wfm else None
+    score = wfm.get('consistency_score') if wfm else None
+    return (
+        _WF_ICONS.get(rec, '— Not run'),
+        f'{score:.2f}' if score is not None else '—',
+    )
 
 
 def _compute_wf_summary(df: pd.DataFrame) -> dict:
@@ -103,12 +99,12 @@ _SOURCE_BADGES = {
 def _build_table_df(entries: list, wf_cache: dict) -> pd.DataFrame:
     rows = []
     for e in entries:
-        sm   = e.get('scan_metrics', {})
-        wfs  = _get_wf_status(e, wf_cache)
-        _cs  = wfs.get('consistency_score') if wfs else None
+        sm = e.get('scan_metrics', {})
+        _wf_status, _wf_score = _get_wf_status(e, wf_cache)
+        _cs_num = float(_wf_score) if _wf_score != '—' else -999.0
         rows.append({
             'id':           e['id'],
-            '_consist':     _cs if _cs is not None else -999.0,
+            '_consist':     _cs_num,
             'Pair':         f"{e['long']} / {e['short']}",
             'Asset Classes':f"{e.get('asset_class_long', '?')} × {e.get('asset_class_short', '?')}",
             'Params':       f"E{e['entry_sd']} X{e['exit_sd']} V{e['vol_window']} T{e['trend_window']}",
@@ -117,8 +113,8 @@ def _build_table_df(entries: list, wf_cache: dict) -> pd.DataFrame:
             'WT Net WR':    f"{sm['net_wr_wt']:.1%}" if sm.get('net_wr_wt') is not None else '—',
             'WT Avg Net':   f"{sm['avg_net_wt']:+.4f}" if sm.get('avg_net_wt') is not None else '—',
             'WT Hold':      f"{sm.get('avg_hold_wt', '—')}d" if sm.get('avg_hold_wt') else '—',
-            'WF Status':    _wf_badge(e['id'], wf_cache, wfs),
-            'WF Consist.':  _wf_consistency(e['id'], wf_cache, wfs),
+            'WF Status':    _wf_status,
+            'WF Consist.':  _wf_score,
             'Source':       _SOURCE_BADGES.get(e.get('source', ''), e.get('source', '—') or '—'),
             'Added':        e.get('added', ''),
             'Notes':        (e.get('notes', '') or '')[:40],
@@ -178,7 +174,7 @@ def render() -> None:
         if _search:
             if _search not in e.get('long', '').upper() and _search not in e.get('short', '').upper():
                 return False
-        if _wf_only and _get_wf_status(e, wf_cache) is None:
+        if _wf_only and _get_wf_status(e, wf_cache)[0] == '— Not run':
             return False
         return True
 
@@ -220,14 +216,14 @@ def render() -> None:
 
     # ── Detail panel ─────────────────────────────────────────────────────────
     with st.container(border=True):
-        sm   = entry.get('scan_metrics', {})
-        _wfs = _get_wf_status(entry, wf_cache)
+        sm = entry.get('scan_metrics', {})
+        _wf_status, _wf_score = _get_wf_status(entry, wf_cache)
         d1, d2, d3, d4, d5 = st.columns(5)
         d1.metric("Pair",       f"{entry['long']} / {entry['short']}")
         d2.metric("Best Dir",   sm.get('best_dir', '—'))
         d3.metric("WT Trades",  sm.get('trades_wt', '—'))
         d4.metric("WT Avg Net", f"{sm['avg_net_wt']:+.4f}" if sm.get('avg_net_wt') is not None else '—')
-        d5.metric("WF Status",  _wf_badge(entry['id'], wf_cache, _wfs))
+        d5.metric("WF Status",  _wf_status)
 
         st.caption(
             f"**Params:** Entry {entry['entry_sd']} | Exit {entry['exit_sd']} | "

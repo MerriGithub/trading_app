@@ -258,6 +258,7 @@ def _wf_summary(df: pd.DataFrame) -> dict:
 
 
 def _batch_result_to_watchlist_entry(r: dict) -> dict:
+    _wfm = r.get('wf_metrics', {})
     return {
         'long':              r['long'],
         'short':             r['short'],
@@ -270,6 +271,15 @@ def _batch_result_to_watchlist_entry(r: dict) -> dict:
         'trend_mode':        r['trend_mode'],
         'source':            'batch_wf',
         'scan_metrics':      r.get('scan_metrics', {}),
+        'wf_metrics': {
+            'stable_pct':        _wfm.get('stable_pct'),
+            'avg_oos_net':       _wfm.get('avg_oos_net'),
+            'avg_oos_wr':        _wfm.get('avg_oos_wr'),
+            'consistency_score': _wfm.get('consistency_score'),
+            'recommendation':    _wfm.get('recommendation'),
+            'n_windows':         _wfm.get('n_windows'),
+            'run_at':            _wfm.get('run_at'),
+        },
     }
 
 
