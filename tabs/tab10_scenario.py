@@ -17,6 +17,14 @@ from data_watchlist import add_to_watchlist
 from tabs.shared import registry, _tbl
 
 
+def _get_wt_trades(row) -> int:
+    """Safely get WT trade count from a result row (handles both scan modes)."""
+    for col in ('Trades_WT', 'trades_wt', 'Trades', 'trades'):
+        if col in row.index and pd.notna(row[col]):
+            return int(row[col])
+    return 0
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _sc_load_prices(asset_key: str) -> tuple[pd.DataFrame, list[str]]:
     _insts = [c for c in get_tradeable_instruments(asset_key) if c not in FI_EXCLUDE]
@@ -447,41 +455,73 @@ def _render_results(sc_min_trades: int) -> None:
 
                 # ── Send to Batch Walk-Forward (🟢 Short bucket only) ────────
                 if _bkt == '🟢 Short':
-                    if st.button(
-                        f"📐 Send {len(_bdf)} pairs to Walk-Forward →",
-                        key='sc_send_wf_green',
-                        type='primary',
-                    ):
-                        _tw_raw = lambda r: int(str(r.get('Trend Window', '262d')).rstrip('d'))
-                        _wf_batch = []
-                        for _, _r in _bdf.iterrows():
-                            _wf_batch.append({
-                                'long':              str(_r['_long']),
-                                'short':             str(_r['_short']),
-                                'asset_class_long':  str(_r.get('_asset_class_long', '')),
-                                'asset_class_short': str(_r.get('_asset_class_short', '')),
-                                'entry_sd':          float(_r['Entry SD']),
-                                'exit_sd':           float(_r['Exit SD']),
-                                'vol_window':        int(_r['Vol Window']),
-                                'trend_window':      _tw_raw(_r),
-                                'trend_mode':        str(_r.get('_trend_mode', 'Both passes')),
-                                'scan_metrics': {
-                                    'trades_wt':   int(_r.get('Trades_WT', _r.get('Trades', 0))),
-                                    'net_wr_wt':   float(_r.get('NetWR_WT', _r.get('Net WR%', 0)) or 0),
-                                    'avg_net_wt':  float(_r.get('AvgNet_WT', _r.get('Avg Net', 0)) or 0),
-                                    'avg_hold_wt': int(_r.get('AvgHold_WT', _r.get('Avg Hold', 0)) or 0),
-                                    'trades_ct':   int(_r.get('Trades_CT', 0)),
-                                    'net_wr_ct':   float(_r.get('NetWR_CT', 0) or 0),
-                                    'avg_net_ct':  float(_r.get('AvgNet_CT', 0) or 0),
-                                    'avg_hold_ct': int(_r.get('AvgHold_CT', 0) or 0),
-                                    'best_dir':    str(_r.get('Best Dir', '')),
-                                },
-                            })
-                        st.session_state['wf_batch'] = _wf_batch
-                        st.session_state['wf_batch_source'] = 'tab10_green'
-                        st.session_state.pop('wf_batch_results', None)
-                        st.session_state['sidebar_nav_pending'] = "🔀 Walk-Forward"
-                        st.rerun()
+                    _min_wt = int(st.number_input(
+                        "Min WT trades to include in batch",
+                        min_value=1, max_value=50, value=8, step=1,
+                        key="tab10_min_wt_trades",
+                        help=(
+                            "Only pairs with at least this many With-Trend trades are sent to "
+                            "Walk-Forward. Filters out rows where the WT signal has too little "
+                            "history for a meaningful walk-forward result."
+                        ),
+                    ))
+                    _green_wf_rows = _bdf[_bdf.apply(_get_wt_trades, axis=1) >= _min_wt]
+                    _excluded = len(_bdf) - len(_green_wf_rows)
+
+                    if len(_green_wf_rows) > 0:
+                        _cb1, _cb2 = st.columns([2, 5])
+                        with _cb1:
+                            if st.button(
+                                f"📐 Send {len(_green_wf_rows)} pairs to Walk-Forward →",
+                                key='sc_send_wf_green',
+                                type='primary',
+                            ):
+                                _tw_raw = lambda r: int(str(r.get('Trend Window', '262d')).rstrip('d'))
+                                _wf_batch = []
+                                for _, _r in _green_wf_rows.iterrows():
+                                    _wf_batch.append({
+                                        'long':              str(_r['_long']),
+                                        'short':             str(_r['_short']),
+                                        'asset_class_long':  str(_r.get('_asset_class_long', '')),
+                                        'asset_class_short': str(_r.get('_asset_class_short', '')),
+                                        'entry_sd':          float(_r['Entry SD']),
+                                        'exit_sd':           float(_r['Exit SD']),
+                                        'vol_window':        int(_r['Vol Window']),
+                                        'trend_window':      _tw_raw(_r),
+                                        'trend_mode':        str(_r.get('_trend_mode', 'Both passes')),
+                                        'scan_metrics': {
+                                            'trades_wt':   _get_wt_trades(_r),
+                                            'net_wr_wt':   float(_r.get('NetWR_WT', _r.get('Net WR%', 0)) or 0),
+                                            'avg_net_wt':  float(_r.get('AvgNet_WT', _r.get('Avg Net', 0)) or 0),
+                                            'avg_hold_wt': int(_r.get('AvgHold_WT', _r.get('Avg Hold', 0)) or 0),
+                                            'trades_ct':   int(_r.get('Trades_CT', 0)),
+                                            'net_wr_ct':   float(_r.get('NetWR_CT', 0) or 0),
+                                            'avg_net_ct':  float(_r.get('AvgNet_CT', 0) or 0),
+                                            'avg_hold_ct': int(_r.get('AvgHold_CT', 0) or 0),
+                                            'best_dir':    str(_r.get('Best Dir', '')),
+                                        },
+                                    })
+                                st.session_state['wf_batch'] = _wf_batch
+                                st.session_state['wf_batch_source'] = 'tab10_green'
+                                st.session_state.pop('wf_batch_results', None)
+                                st.session_state['sidebar_nav_pending'] = "🔀 Walk-Forward"
+                                st.rerun()
+                        with _cb2:
+                            if _excluded > 0:
+                                st.caption(
+                                    f"{len(_green_wf_rows)} pairs · avg hold ≤ 45d · "
+                                    f"{_excluded} excluded (< {_min_wt} WT trades)"
+                                )
+                            else:
+                                st.caption(
+                                    f"{len(_green_wf_rows)} pairs · avg hold ≤ 45d · "
+                                    "all pass WT trades filter"
+                                )
+                    else:
+                        st.info(
+                            f"No 🟢 pairs pass the Min WT trades filter (≥ {_min_wt}). "
+                            "Lower the filter or adjust scan parameters."
+                        )
 
                 # ── Per-row action area ──────────────────────────────────────
                 _pair_labels = [

@@ -448,6 +448,55 @@ def render() -> None:
         f"{'🎯 Scenario Scanner (🟢 Short bucket)' if _src_label == 'tab10_green' else _src_label}"
     )
 
+    with st.expander(
+        f"📋 Review batch ({len(_batch)} pairs) — expand to verify parameters before running",
+        expanded=False,
+    ):
+        _preview_rows = []
+        for _p in _batch:
+            _sm = _p.get('scan_metrics', {})
+            _preview_rows.append({
+                'Long':          _p['long'],
+                'Short':         _p['short'],
+                'Asset Classes': f"{_p.get('asset_class_long','?')} × {_p.get('asset_class_short','?')}",
+                'Entry SD':      _p['entry_sd'],
+                'Exit SD':       _p['exit_sd'],
+                'Vol Window':    _p['vol_window'],
+                'Trend Window':  _p['trend_window'],
+                'Trend Mode':    _p['trend_mode'],
+                'Trades WT':     _sm.get('trades_wt', '—'),
+                'Net WR WT':     f"{_sm['net_wr_wt']*100:.1f}%" if _sm.get('net_wr_wt') is not None else '—',
+                'Avg Net WT':    f"{_sm['avg_net_wt']*100:.2f}%" if _sm.get('avg_net_wt') is not None else '—',
+                'Hold WT':       f"{_sm['avg_hold_wt']}d" if _sm.get('avg_hold_wt') is not None else '—',
+            })
+        _preview_df = pd.DataFrame(_preview_rows)
+
+        def _highlight_thin(row):
+            try:
+                n = int(row.get('Trades WT', 0))
+            except (ValueError, TypeError):
+                n = 0
+            return ['background-color: #3d2020'] * len(row) if n < 8 else [''] * len(row)
+
+        st.dataframe(
+            _preview_df.style.apply(_highlight_thin, axis=1),
+            use_container_width=True,
+            hide_index=True,
+        )
+        _thin = [p for p in _batch if int(p.get('scan_metrics', {}).get('trades_wt', 0) or 0) < 8]
+        if _thin:
+            st.warning(
+                f"⚠️ {len(_thin)} pair(s) have fewer than 8 WT trades "
+                "(highlighted in red). These are likely to produce Error or "
+                "Curve-fitted WF results. Consider raising the Min WT trades "
+                "filter in Tab 10 before sending."
+            )
+        else:
+            st.success(
+                f"✅ All {len(_batch)} pairs have ≥ 8 WT trades. "
+                "Parameters look consistent — ready to run."
+            )
+
     _bw1, _bw2, _bw3, _bw4 = st.columns(4)
     _b_is     = int(_bw1.number_input("In-sample (days)",      252, 2520,  756, key='wfb_is'))
     _b_oos    = int(_bw2.number_input("Out-of-sample (days)",   63,  756,  252, key='wfb_oos'))
