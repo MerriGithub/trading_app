@@ -18,6 +18,7 @@ import tabs.tab8_backtest      as tab8
 import tabs.tab9_walkforward   as tab9
 import tabs.tab10_scenario     as tab10
 import tabs.tab11_walkforward  as tab11
+import tabs.tab12_watchlist    as tab12
 
 st.set_page_config(
     page_title="Spread Trading Platform",
@@ -50,6 +51,7 @@ _TABS = [
     "✅ Trade Validation",
     "🎯 Scenario",
     "🔀 Walk-Forward",
+    "🗂️ Watchlist",
 ]
 
 with st.sidebar:
@@ -93,3 +95,5 @@ elif _active_tab == _TABS[9]:  # Scenario
     tab10.render()
 elif _active_tab == _TABS[10]: # Walk-Forward
     tab11.render()
+elif _active_tab == _TABS[11]: # Watchlist
+    tab12.render()

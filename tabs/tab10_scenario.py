@@ -13,6 +13,7 @@ from engine.backtest import (
 )
 from engine.numba_core import COL_ENTRY_IDX as _SC_CEI, COL_SIDE as _SC_CS
 from asset_configs import ASSET_CLASSES, FI_EXCLUDE, get_tradeable_instruments, get_display_name
+from data_watchlist import add_to_watchlist
 from tabs.shared import registry, _tbl
 
 
@@ -263,8 +264,11 @@ def _run_scan(
                                          'WT'      if _wt_pos else
                                          'CT'      if _ct_pos else 'Neither')
                             _sc_rows.append({
-                                '_long':         _long_i,
-                                '_short':        _short_i,
+                                '_long':              _long_i,
+                                '_short':             _short_i,
+                                '_asset_class_long':  _lk,
+                                '_asset_class_short': _sk,
+                                '_trend_mode':        sc_trend_mode,
                                 'Long':          _l_disp,
                                 'Short':         _s_disp,
                                 'Asset Classes': _label,
@@ -298,8 +302,11 @@ def _run_scan(
                         _use_n = _n_tr
 
                     _sc_rows.append({
-                        '_long':         _long_i,
-                        '_short':        _short_i,
+                        '_long':              _long_i,
+                        '_short':             _short_i,
+                        '_asset_class_long':  _lk,
+                        '_asset_class_short': _sk,
+                        '_trend_mode':        sc_trend_mode,
                         'Long':          _l_disp,
                         'Short':         _s_disp,
                         'Asset Classes': _label,
@@ -438,37 +445,102 @@ def _render_results(sc_min_trades: int) -> None:
 
                 st.dataframe(_tbl_df, use_container_width=True, hide_index=True)
 
+                # ── "Add all" button ────────────────────────────────────────
+                if st.button("★ Add all visible to Watchlist", key=f'sc_add_all_{_bkt}'):
+                    _tw_raw = lambda r: int(str(r.get('Trend Window', '262d')).rstrip('d'))
+                    for _, _r in _bdf.iterrows():
+                        add_to_watchlist({
+                            'long':              str(_r['_long']),
+                            'short':             str(_r['_short']),
+                            'asset_class_long':  str(_r.get('_asset_class_long', '')),
+                            'asset_class_short': str(_r.get('_asset_class_short', '')),
+                            'entry_sd':          float(_r['Entry SD']),
+                            'exit_sd':           float(_r['Exit SD']),
+                            'vol_window':        int(_r['Vol Window']),
+                            'trend_window':      _tw_raw(_r),
+                            'trend_mode':        str(_r.get('_trend_mode', 'Both passes')),
+                            'source':            'tab10',
+                            'scan_metrics': {
+                                'trades_wt':  int(_r.get('Trades_WT', _r.get('Trades', 0))),
+                                'net_wr_wt':  float(_r.get('NetWR_WT', _r.get('Net WR%', 0)) or 0),
+                                'avg_net_wt': float(_r.get('AvgNet_WT', _r.get('Avg Net', 0)) or 0),
+                                'avg_hold_wt':int(_r.get('AvgHold_WT', _r.get('Avg Hold', 0)) or 0),
+                                'trades_ct':  int(_r.get('Trades_CT', 0)),
+                                'net_wr_ct':  float(_r.get('NetWR_CT', 0) or 0),
+                                'avg_net_ct': float(_r.get('AvgNet_CT', 0) or 0),
+                                'avg_hold_ct':int(_r.get('AvgHold_CT', 0) or 0),
+                                'best_dir':   str(_r.get('Best Dir', '')),
+                            },
+                        })
+                    st.toast(f"★ Added {len(_bdf)} pairs to watchlist")
+
+                # ── Per-row action area ──────────────────────────────────────
                 _pair_labels = [
                     f"#{r['Rank']} — {r['Long']} / {r['Short']}"
                     for _, r in _bdf.iterrows()
                 ]
                 _sel = st.selectbox(
-                    "Open a pair in Pair Analysis →",
+                    "Select a pair",
                     ['— select a pair —'] + _pair_labels,
                     key=f'sc_sel_{_bkt}',
                 )
-                if _sel != '— select a pair —' and st.button(
-                    "Open in Pair Analysis →", key=f'sc_open_{_bkt}',
-                ):
+                if _sel != '— select a pair —':
                     _row = _bdf.iloc[_pair_labels.index(_sel)]
-                    st.session_state['pa_long_pending']   = [_row['_long']]
-                    st.session_state['pa_short_pending']  = [_row['_short']]
-                    st.session_state['pa_pair_pending']   = '— Custom pair —'
-                    st.session_state['sc_long_pending']   = [_row['_long']]
-                    st.session_state['sc_short_pending']  = [_row['_short']]
-                    st.session_state['wf11_long_pending'] = [_row['_long']]
-                    st.session_state['wf11_short_pending']= [_row['_short']]
-                    st.session_state['wf_pair'] = {
-                        'long':   [_row['_long']],
-                        'short':  [_row['_short']],
-                        'source': 'tab10',
-                    }
-                    st.toast(
-                        f"Loaded {_row['Long']} / {_row['Short']} — "
-                        "switching to pair tabs",
-                        icon="📈",
-                    )
-                    st.rerun()
+                    _tw_val = int(str(_row.get('Trend Window', '262d')).rstrip('d'))
+                    _act1, _act2 = st.columns(2)
+
+                    if _act1.button("Open in Pair Analysis →", key=f'sc_open_{_bkt}'):
+                        st.session_state['pa_long_pending']   = [_row['_long']]
+                        st.session_state['pa_short_pending']  = [_row['_short']]
+                        st.session_state['pa_pair_pending']   = '— Custom pair —'
+                        st.session_state['pa_vol']            = int(_row['Vol Window'])
+                        st.session_state['pa_xing']           = float(_row['Entry SD'])
+                        st.session_state['pa_exit']           = float(_row['Exit SD'])
+                        st.session_state['pa_trend_window']   = _tw_val
+                        st.session_state['sc_long_pending']   = [_row['_long']]
+                        st.session_state['sc_short_pending']  = [_row['_short']]
+                        st.session_state['wf11_long_pending'] = [_row['_long']]
+                        st.session_state['wf11_short_pending']= [_row['_short']]
+                        st.session_state['wf_pair'] = {
+                            'long':              [_row['_long']],
+                            'short':             [_row['_short']],
+                            'vol_window':        int(_row['Vol Window']),
+                            'entry_sd':          float(_row['Entry SD']),
+                            'exit_sd':           float(_row['Exit SD']),
+                            'trend_window':      _tw_val,
+                            'trend_mode':        str(_row.get('_trend_mode', 'Both passes')),
+                            'asset_class_long':  str(_row.get('_asset_class_long', '')),
+                            'asset_class_short': str(_row.get('_asset_class_short', '')),
+                            'source':            'tab10',
+                        }
+                        st.session_state['sidebar_nav'] = "📈 Pair Analysis"
+                        st.rerun()
+
+                    if _act2.button("★ Add to Watchlist", key=f'sc_wl_{_bkt}'):
+                        _eid = add_to_watchlist({
+                            'long':              str(_row['_long']),
+                            'short':             str(_row['_short']),
+                            'asset_class_long':  str(_row.get('_asset_class_long', '')),
+                            'asset_class_short': str(_row.get('_asset_class_short', '')),
+                            'entry_sd':          float(_row['Entry SD']),
+                            'exit_sd':           float(_row['Exit SD']),
+                            'vol_window':        int(_row['Vol Window']),
+                            'trend_window':      _tw_val,
+                            'trend_mode':        str(_row.get('_trend_mode', 'Both passes')),
+                            'source':            'tab10',
+                            'scan_metrics': {
+                                'trades_wt':  int(_row.get('Trades_WT', _row.get('Trades', 0))),
+                                'net_wr_wt':  float(_row.get('NetWR_WT', _row.get('Net WR%', 0)) or 0),
+                                'avg_net_wt': float(_row.get('AvgNet_WT', _row.get('Avg Net', 0)) or 0),
+                                'avg_hold_wt':int(_row.get('AvgHold_WT', _row.get('Avg Hold', 0)) or 0),
+                                'trades_ct':  int(_row.get('Trades_CT', 0)),
+                                'net_wr_ct':  float(_row.get('NetWR_CT', 0) or 0),
+                                'avg_net_ct': float(_row.get('AvgNet_CT', 0) or 0),
+                                'avg_hold_ct':int(_row.get('AvgHold_CT', 0) or 0),
+                                'best_dir':   str(_row.get('Best Dir', '')),
+                            },
+                        })
+                        st.toast(f"★ {_row['Long']}/{_row['Short']} added to watchlist")
 
     st.divider()
     _sc_csv = (
