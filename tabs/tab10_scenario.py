@@ -25,6 +25,25 @@ def _get_wt_trades(row) -> int:
     return 0
 
 
+def _resolve_trend_mode(row) -> str:
+    """
+    Derive the correct WF trend mode for a scan result row.
+
+    When the scan ran in "Both passes" mode, Best Dir identifies which
+    direction was actually profitable — the WF should test that direction,
+    not re-run both passes. For single-direction scans the scan mode is
+    already correct.
+    """
+    scan_mode = str(row.get('_trend_mode', 'Both passes'))
+    if scan_mode != 'Both passes':
+        return scan_mode
+    return {
+        'WT':   'With-trend only',
+        'CT':   'Counter-trend only',
+        'Both': 'Both passes',
+    }.get(str(row.get('Best Dir', '')), 'Both passes')
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _sc_load_prices(asset_key: str) -> tuple[pd.DataFrame, list[str]]:
     _insts = [c for c in get_tradeable_instruments(asset_key) if c not in FI_EXCLUDE]
@@ -488,7 +507,7 @@ def _render_results(sc_min_trades: int) -> None:
                                         'exit_sd':           float(_r['Exit SD']),
                                         'vol_window':        int(_r['Vol Window']),
                                         'trend_window':      _tw_raw(_r),
-                                        'trend_mode':        str(_r.get('_trend_mode', 'Both passes')),
+                                        'trend_mode':        _resolve_trend_mode(_r),
                                         'scan_metrics': {
                                             'trades_wt':   _get_wt_trades(_r),
                                             'net_wr_wt':   float(_r.get('NetWR_WT', _r.get('Net WR%', 0)) or 0),
@@ -557,7 +576,7 @@ def _render_results(sc_min_trades: int) -> None:
                             'entry_sd':          float(_row['Entry SD']),
                             'exit_sd':           float(_row['Exit SD']),
                             'trend_window':      _tw_val,
-                            'trend_mode':        str(_row.get('_trend_mode', 'Both passes')),
+                            'trend_mode':        _resolve_trend_mode(_row),
                             'asset_class_long':  str(_row.get('_asset_class_long', '')),
                             'asset_class_short': str(_row.get('_asset_class_short', '')),
                             'source':            'tab10',
@@ -575,7 +594,7 @@ def _render_results(sc_min_trades: int) -> None:
                             'exit_sd':           float(_row['Exit SD']),
                             'vol_window':        int(_row['Vol Window']),
                             'trend_window':      _tw_val,
-                            'trend_mode':        str(_row.get('_trend_mode', 'Both passes')),
+                            'trend_mode':        _resolve_trend_mode(_row),
                             'source':            'tab10',
                             'scan_metrics': {
                                 'trades_wt':  int(_row.get('Trades_WT', _row.get('Trades', 0))),
