@@ -11,9 +11,97 @@ from tabs.shared import (
 )
 
 
+def _render_pending_entry(p: dict) -> None:
+    """Confirm form for a trade received from Stake Calculator via Book Trade."""
+    long_str  = " + ".join(ALL_DISPLAY.get(i, i) for i in p["long_legs"])
+    short_str = " + ".join(ALL_DISPLAY.get(i, i) for i in p["short_legs"])
+    st.info(f"📒 Trade from Stake Calc — review and confirm: **{long_str}** vs **{short_str}**")
+
+    with st.form("tab7_book_trade_form"):
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            _name = st.text_input(
+                "Trade name *",
+                value=(
+                    f"{p['long_legs'][0] if p['long_legs'] else '?'} / "
+                    f"{p['short_legs'][0] if p['short_legs'] else '?'}"
+                ),
+            )
+            _direction = st.selectbox(
+                "Direction",
+                ["long_spread", "short_spread"],
+                index=0 if p.get("direction") == "long_spread" else 1,
+            )
+        with fc2:
+            _target_exp = st.number_input(
+                "Target exposure (£)",
+                value=float(p.get("target_exposure", 500.0)),
+                min_value=50.0,
+                step=50.0,
+            )
+            _comments = st.text_area(
+                "Comments",
+                value=f"Broker: {p.get('broker', 'IG')} | Mode: {p.get('mode', 'SB')}",
+                height=68,
+            )
+
+        with st.expander("📊 Stake Calc summary", expanded=True):
+            sm1, sm2, sm3, sm4 = st.columns(4)
+            sm1.metric("Margin", f"£{p.get('margin', 0):,.0f}")
+            sm2.metric("Spread cost", f"{p.get('spread_cost_pct', 0):.3%}")
+            sm3.metric("Daily financing", f"£{p.get('daily_financing', 0):,.2f}")
+            _be = p.get("breakeven_days")
+            sm4.metric("Breakeven hold", f"{_be:.0f}d" if _be is not None else "∞")
+            st.caption("Stakes (£/pt):")
+            for inst, stk in p.get("stakes", {}).items():
+                _side = "Long" if stk >= 0 else "Short"
+                _px   = p["prices"].get(inst, 0)
+                st.caption(
+                    f"  {ALL_DISPLAY.get(inst, inst)}: {_side} "
+                    f"£{abs(stk):.3f}/pt @ {_px:,.2f}"
+                )
+
+        cs, cd = st.columns(2)
+        _submitted = cs.form_submit_button(
+            "💾 Confirm & Open Position", type="primary", use_container_width=True
+        )
+        _discarded = cd.form_submit_button("🗑 Discard", use_container_width=True)
+
+    if _submitted:
+        if not _name.strip():
+            st.error("Trade name is required.")
+            st.session_state["tab7_pending_entry"] = p
+        else:
+            try:
+                _basket = Basket(long_legs=p["long_legs"], short_legs=p["short_legs"])
+                _basket.validate()
+                pos = portfolio.open_position(
+                    basket=_basket,
+                    direction=_direction,
+                    entry_prices=p["prices"],
+                    stakes=p["stakes"],
+                    target_exposure=_target_exp,
+                    name=_name.strip(),
+                    comments=_comments,
+                )
+                st.success(f"✅ Opened **{pos.name}** — navigate to Journal to view.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to open position: {e}")
+                st.session_state["tab7_pending_entry"] = p
+
+    if _discarded:
+        st.rerun()
+
+
 def render() -> None:
     st.header("Journal")
     st.caption("Paper trade open/close, position history, and live P&L.")
+
+    _pending = st.session_state.pop("tab7_pending_entry", None)
+    if _pending:
+        _render_pending_entry(_pending)
+        return
 
     st.subheader(f"Open positions ({len(portfolio.open_positions)})")
 

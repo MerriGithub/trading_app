@@ -12,7 +12,7 @@ from engine.backtest import (
     aggregate_trades as _sc_agg,
 )
 from engine.numba_core import COL_ENTRY_IDX as _SC_CEI, COL_SIDE as _SC_CS
-from asset_configs import ASSET_CLASSES, FI_EXCLUDE, get_tradeable_instruments, get_display_name
+from asset_configs import ASSET_CLASSES, FI_EXCLUDE, COMMODITY_EXCLUDE, _DEFAULT_SCORING_MODE, get_tradeable_instruments, get_display_name
 from data_watchlist import add_to_watchlist
 from tabs.shared import registry, _tbl
 
@@ -46,7 +46,8 @@ def _resolve_trend_mode(row) -> str:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _sc_load_prices(asset_key: str) -> tuple[pd.DataFrame, list[str]]:
-    _insts = [c for c in get_tradeable_instruments(asset_key) if c not in FI_EXCLUDE]
+    _excl  = FI_EXCLUDE if asset_key == 'fixed_income' else (COMMODITY_EXCLUDE if asset_key == 'commodities' else frozenset())
+    _insts = [c for c in get_tradeable_instruments(asset_key) if c not in _excl]
     _df    = registry.get_daily_prices(_insts)
     _valid = [c for c in _insts if c in _df.columns]
     return _df, _valid
@@ -169,9 +170,14 @@ def _run_scan(
     _sc_slb = min(20, sc_trend_win // 10)
 
     _sc_scope_work: list[tuple] = []
+    def _excl(ac: str) -> frozenset:
+        if ac == 'fixed_income': return FI_EXCLUDE
+        if ac == 'commodities':  return COMMODITY_EXCLUDE
+        return frozenset()
+
     for _lk, _sk, _intra, _label in _scope_defs:
-        _l_insts = [c for c in get_tradeable_instruments(_lk) if c not in FI_EXCLUDE]
-        _s_insts = [c for c in get_tradeable_instruments(_sk) if c not in FI_EXCLUDE]
+        _l_insts = [c for c in get_tradeable_instruments(_lk) if c not in _excl(_lk)]
+        _s_insts = [c for c in get_tradeable_instruments(_sk) if c not in _excl(_sk)]
         if _intra:
             _pairs = list(combinations(_l_insts, 2))
         else:
@@ -442,7 +448,7 @@ def _render_results(sc_min_trades: int) -> None:
                     for _c in ['AvgNet_WT', 'AvgNet_CT']:
                         if _c in _tbl_df.columns:
                             _tbl_df[_c] = _tbl_df[_c].apply(
-                                lambda v: f'{v:+.4f}' if not (isinstance(v, float) and np.isnan(v)) else '—'
+                                lambda v: f'{v*100:+.2f}%' if not (isinstance(v, float) and np.isnan(v)) else '—'
                             )
                     for _c in ['AvgHold_WT', 'AvgHold_CT']:
                         if _c in _tbl_df.columns:
@@ -462,8 +468,8 @@ def _render_results(sc_min_trades: int) -> None:
                     _tbl_df = _bdf[[c for c in _disp_cols if c in _bdf.columns]].copy()
                     _tbl_df['Gross WR%'] = _tbl_df['Gross WR%'].map('{:.1%}'.format)
                     _tbl_df['Net WR%']   = _tbl_df['Net WR%'].map('{:.1%}'.format)
-                    _tbl_df['Avg Gross'] = _tbl_df['Avg Gross'].map('{:+.4f}'.format)
-                    _tbl_df['Avg Net']   = _tbl_df['Avg Net'].map('{:+.4f}'.format)
+                    _tbl_df['Avg Gross'] = _tbl_df['Avg Gross'].map(lambda v: f'{v*100:+.2f}%')
+                    _tbl_df['Avg Net']   = _tbl_df['Avg Net'].map(lambda v: f'{v*100:+.2f}%')
                     _tbl_df['Avg Hold']  = _tbl_df['Avg Hold'].map('{:.0f}d'.format)
                     _tbl_df['Est Cost']  = _tbl_df['Est Cost'].map('{:.3%}'.format)
                     _tbl_df['Aligned%']  = _tbl_df['Aligned%'].apply(
@@ -585,16 +591,24 @@ def _render_results(sc_min_trades: int) -> None:
                         st.rerun()
 
                     if _act2.button("★ Add to Watchlist", key=f'sc_wl_{_bkt}'):
+                        _wl_ac_l = str(_row.get('_asset_class_long', ''))
+                        _wl_ac_s = str(_row.get('_asset_class_short', ''))
+                        _wl_mode = (
+                            _DEFAULT_SCORING_MODE.get('commodities', 'contrarian')
+                            if 'commodities' in (_wl_ac_l, _wl_ac_s)
+                            else _DEFAULT_SCORING_MODE.get(_wl_ac_l, 'composite')
+                        )
                         _eid = add_to_watchlist({
                             'long':              str(_row['_long']),
                             'short':             str(_row['_short']),
-                            'asset_class_long':  str(_row.get('_asset_class_long', '')),
-                            'asset_class_short': str(_row.get('_asset_class_short', '')),
+                            'asset_class_long':  _wl_ac_l,
+                            'asset_class_short': _wl_ac_s,
                             'entry_sd':          float(_row['Entry SD']),
                             'exit_sd':           float(_row['Exit SD']),
                             'vol_window':        int(_row['Vol Window']),
                             'trend_window':      _tw_val,
                             'trend_mode':        _resolve_trend_mode(_row),
+                            'scoring_mode':      _wl_mode,
                             'source':            'tab10',
                             'scan_metrics': {
                                 'trades_wt':  int(_row.get('Trades_WT', _row.get('Trades', 0))),

@@ -207,6 +207,189 @@ def run_walk_forward(
     return result
 
 
+def run_cross_asset_walkforward(
+    prices_long: pd.DataFrame,
+    prices_short: pd.DataFrame,
+    instruments_long: list[str],
+    instruments_short: list[str],
+    is_years: int = 5,
+    oos_years: int = 2,
+    step_years: int = 1,
+    scoring_mode: str = 'composite',
+    vol_window: int = 262,
+    target_vol: float = 0.01,
+    xing_sd: float = 2.0,
+    exit_sd: float = 0.0,
+    spread_cost_pct: float = 0.001,
+    progress_cb=None,
+) -> pd.DataFrame:
+    """
+    Walk-forward analysis over cross-asset directional pairs.
+
+    Generates all (long_i, short_j) and (long_j=short_j, short_i=long_i) pairs
+    across two separate asset class price DataFrames.  Date alignment on index
+    intersection is performed before vol scaling.
+
+    Returns same structure as run_walk_forward() so Tab 9 rendering is unchanged.
+    """
+    common_dates = prices_long.index.intersection(prices_short.index)
+    min_days = (is_years + oos_years) * _TDY
+    if len(common_dates) < min_days:
+        return pd.DataFrame()
+
+    pl = prices_long.loc[common_dates, instruments_long]
+    ps = prices_short.loc[common_dates, instruments_short]
+
+    scaled_long_df,  day_ints = _vol_scaled(pl, instruments_long,  vol_window, target_vol)
+    scaled_short_df, _        = _vol_scaled(ps, instruments_short, vol_window, target_vol)
+
+    # Align to the shorter scaled result (dropna can shorten each independently)
+    common_scaled = scaled_long_df.index.intersection(scaled_short_df.index)
+    scaled_long_df  = scaled_long_df.loc[common_scaled]
+    scaled_short_df = scaled_short_df.loc[common_scaled]
+    day_ints = (
+        (common_scaled - pd.Timestamp('1970-01-01')) // pd.Timedelta('1D')
+    ).values.astype(np.int64)
+
+    sl = scaled_long_df.values.astype(np.float64)
+    ss = scaled_short_df.values.astype(np.float64)
+    T  = sl.shape[0]
+    NL = len(instruments_long)
+    NS = len(instruments_short)
+
+    is_days   = is_years  * _TDY
+    oos_days  = oos_years * _TDY
+    step_days = step_years * _TDY
+
+    windows: list[tuple[int, int, int]] = []
+    pos = 0
+    while pos + is_days + oos_days <= T:
+        windows.append((pos, pos + is_days, pos + is_days + oos_days))
+        pos += step_days
+
+    if not windows:
+        return pd.DataFrame()
+
+    all_records: list[dict] = []
+    n_windows = len(windows)
+
+    for w_idx, (is_start, is_end, oos_end) in enumerate(windows):
+        sl_is  = sl[is_start:is_end]
+        sl_oos = sl[is_end:oos_end]
+        ss_is  = ss[is_start:is_end]
+        ss_oos = ss[is_end:oos_end]
+        di_is  = day_ints[is_start:is_end]
+        di_oos = day_ints[is_end:oos_end]
+
+        if sl_is.shape[0] < vol_window // 2 or sl_oos.shape[0] < 5:
+            continue
+
+        is_label  = scaled_long_df.index[is_start].year
+        oos_label = scaled_long_df.index[min(oos_end - 1, T - 1)].year
+
+        window_records: list[dict] = []
+
+        # Direction 1: long from long universe, short from short universe
+        for li in range(NL):
+            lr_is  = sl_is[:, li]
+            lr_oos = sl_oos[:, li]
+            spread_is  = lr_is[:, None] - ss_is    # (is_T, NS)
+            spread_oos = lr_oos[:, None] - ss_oos  # (oos_T, NS)
+
+            is_shape = _batch_scores(spread_is)
+            is_bt    = batch_backtest(spread_is,  vol_window, xing_sd, exit_sd, di_is)
+            oos_bt   = batch_backtest(spread_oos, vol_window, xing_sd, exit_sd, di_oos)
+
+            for si in range(NS):
+                is_n  = int(is_bt[si, BR_N_TRADES])
+                oos_n = int(oos_bt[si, BR_N_TRADES])
+                avg_hold = float(is_bt[si, BR_AVG_HOLDING]) if is_n > 0 else 0.0
+                est_cost = estimate_trade_cost(avg_hold, n_long=1, n_short=1,
+                                               spread_cost_pct=spread_cost_pct)
+                window_records.append({
+                    'window':    w_idx,
+                    'is_start':  is_label,
+                    'oos_end':   oos_label,
+                    'long':      instruments_long[li],
+                    'short':     instruments_short[si],
+                    'pair':      f'{instruments_long[li]} / {instruments_short[si]}',
+                    'WinRate':     float(is_bt[si, BR_GROSS_WR])  if is_n > 0 else 0.0,
+                    'Expectancy':  float(is_bt[si, BR_AVG_GROSS]) if is_n > 0 else 0.0,
+                    'AvgHolding':  avg_hold,
+                    'IS_Trades':   is_n,
+                    'EstCost':     est_cost,
+                    'LastSD':      float(is_shape['LastSD'][si]),
+                    'TrendVolRatio': float(is_shape['TrendVolRatio'][si]),
+                    'ReturnSD':    float(is_shape['ReturnSD'][si]),
+                    'FitDataMinMaxSD': float(is_shape['FitDataMinMaxSD'][si]),
+                    'OOS_Trades':  oos_n,
+                    'OOS_WinRate': float(oos_bt[si, BR_GROSS_WR])  if oos_n > 0 else 0.0,
+                    'OOS_Gross':   float(oos_bt[si, BR_AVG_GROSS]) if oos_n > 0 else 0.0,
+                    'OOS_Hold':    float(oos_bt[si, BR_AVG_HOLDING]) if oos_n > 0 else 0.0,
+                })
+
+        # Direction 2: long from short universe, short from long universe
+        for si in range(NS):
+            sr_is  = ss_is[:, si]
+            sr_oos = ss_oos[:, si]
+            spread_is  = sr_is[:, None] - sl_is    # (is_T, NL)
+            spread_oos = sr_oos[:, None] - sl_oos  # (oos_T, NL)
+
+            is_shape = _batch_scores(spread_is)
+            is_bt    = batch_backtest(spread_is,  vol_window, xing_sd, exit_sd, di_is)
+            oos_bt   = batch_backtest(spread_oos, vol_window, xing_sd, exit_sd, di_oos)
+
+            for li in range(NL):
+                is_n  = int(is_bt[li, BR_N_TRADES])
+                oos_n = int(oos_bt[li, BR_N_TRADES])
+                avg_hold = float(is_bt[li, BR_AVG_HOLDING]) if is_n > 0 else 0.0
+                est_cost = estimate_trade_cost(avg_hold, n_long=1, n_short=1,
+                                               spread_cost_pct=spread_cost_pct)
+                window_records.append({
+                    'window':    w_idx,
+                    'is_start':  is_label,
+                    'oos_end':   oos_label,
+                    'long':      instruments_short[si],
+                    'short':     instruments_long[li],
+                    'pair':      f'{instruments_short[si]} / {instruments_long[li]}',
+                    'WinRate':     float(is_bt[li, BR_GROSS_WR])  if is_n > 0 else 0.0,
+                    'Expectancy':  float(is_bt[li, BR_AVG_GROSS]) if is_n > 0 else 0.0,
+                    'AvgHolding':  avg_hold,
+                    'IS_Trades':   is_n,
+                    'EstCost':     est_cost,
+                    'LastSD':      float(is_shape['LastSD'][li]),
+                    'TrendVolRatio': float(is_shape['TrendVolRatio'][li]),
+                    'ReturnSD':    float(is_shape['ReturnSD'][li]),
+                    'FitDataMinMaxSD': float(is_shape['FitDataMinMaxSD'][li]),
+                    'OOS_Trades':  oos_n,
+                    'OOS_WinRate': float(oos_bt[li, BR_GROSS_WR])  if oos_n > 0 else 0.0,
+                    'OOS_Gross':   float(oos_bt[li, BR_AVG_GROSS]) if oos_n > 0 else 0.0,
+                    'OOS_Hold':    float(oos_bt[li, BR_AVG_HOLDING]) if oos_n > 0 else 0.0,
+                })
+
+        if not window_records:
+            continue
+
+        wdf = pd.DataFrame(window_records)
+        wdf = apply_scoring(wdf, scoring_mode)
+        wdf = wdf.sort_values('_score', ascending=False).reset_index(drop=True)
+        wdf['IS_Rank']  = range(1, len(wdf) + 1)
+        wdf['IS_Score'] = wdf['_score']
+        wdf = wdf.drop(columns=['_score'])
+
+        all_records.extend(wdf.to_dict('records'))
+
+        if progress_cb:
+            progress_cb((w_idx + 1) / n_windows)
+
+    if not all_records:
+        return pd.DataFrame()
+
+    result = pd.DataFrame(all_records)
+    result['OOS_Net'] = result['OOS_Gross'] - result['EstCost']
+    return result
+
+
 def summarise_walk_forward(results: pd.DataFrame) -> dict:
     """
     Compute rank correlations, significance tests, and quintile stats.

@@ -6,7 +6,7 @@ import streamlit as st
 
 from data_watchlist import (
     load_watchlist, load_wf_cache,
-    add_to_watchlist, remove_from_watchlist,
+    add_to_watchlist, remove_from_watchlist, clear_watchlist,
     update_notes, save_wf_result,
 )
 from tabs.tab11_walkforward import _run_wf
@@ -92,7 +92,6 @@ _SOURCE_BADGES = {
     'batch_wf': '📐 Batch WF',
     'tab10':    '🔍 Manual',
     'tab12':    '🔍 Manual',
-    'tab1':     '📊 Monitor',
 }
 
 
@@ -140,6 +139,12 @@ def _build_table_df(entries: list, wf_cache: dict) -> pd.DataFrame:
         _par = f"E{e['entry_sd']} X{e['exit_sd']} V{e['vol_window']} T{e['trend_window']}"
         if _n > 1:
             _par += f" (best of {_n})"
+        _is_commodity = (
+            e.get('asset_class_long') == 'commodities' or
+            e.get('asset_class_short') == 'commodities'
+        )
+        _scoring_mode = e.get('scoring_mode')
+        _flag = '⚠️' if _is_commodity and (_scoring_mode is None or _scoring_mode != 'contrarian') else ''
         rows.append({
             'id':           e['id'],
             '_consist':     _cs_num,
@@ -149,10 +154,11 @@ def _build_table_df(entries: list, wf_cache: dict) -> pd.DataFrame:
             'Best Dir':     sm.get('best_dir', '—'),
             'WT Trades':    sm.get('trades_wt', '—'),
             'WT Net WR':    f"{sm['net_wr_wt']:.1%}" if sm.get('net_wr_wt') is not None else '—',
-            'WT Avg Net':   f"{sm['avg_net_wt']:+.4f}" if sm.get('avg_net_wt') is not None else '—',
+            'WT Avg Net':   f"{sm['avg_net_wt']*100:+.2f}%" if sm.get('avg_net_wt') is not None else '—',
             'WT Hold':      f"{sm.get('avg_hold_wt', '—')}d" if sm.get('avg_hold_wt') else '—',
             'WF Status':    _wf_status,
             'WF Consist.':  _wf_score,
+            'Flag':         _flag,
             'Source':       _SOURCE_BADGES.get(e.get('source', ''), e.get('source', '—') or '—'),
             'Added':        e.get('added', ''),
             'Notes':        (e.get('notes', '') or '')[:40],
@@ -160,7 +166,7 @@ def _build_table_df(entries: list, wf_cache: dict) -> pd.DataFrame:
     df = pd.DataFrame(rows) if rows else pd.DataFrame(
         columns=['id', '_consist', 'Pair', 'Asset Classes', 'Params', 'Best Dir',
                  'WT Trades', 'WT Net WR', 'WT Avg Net', 'WT Hold',
-                 'WF Status', 'WF Consist.', 'Source', 'Added', 'Notes']
+                 'WF Status', 'WF Consist.', 'Flag', 'Source', 'Added', 'Notes']
     )
     return df.sort_values('_consist', ascending=False).reset_index(drop=True) if not df.empty else df
 
@@ -172,7 +178,7 @@ def render() -> None:
     entries  = load_watchlist()
     wf_cache = load_wf_cache()
 
-    hdr1, hdr2 = st.columns([6, 1])
+    hdr1, hdr2, hdr3 = st.columns([5, 1, 1])
     hdr1.markdown(f"**{len(entries)} pair(s) saved**")
     if hdr2.button("↻ Refresh", key="wl_refresh"):
         st.rerun()
@@ -180,6 +186,20 @@ def render() -> None:
     if not entries:
         st.info("No pairs saved yet. Run a Scenario scan and click ★ Add to Watchlist.")
         return
+
+    if hdr3.button("🗑️ Clear all", key="wl_clear_all"):
+        st.session_state['wl_pending_clear'] = True
+
+    if st.session_state.get('wl_pending_clear'):
+        st.warning(f"Remove all **{len(entries)} pair(s)** from the watchlist? This cannot be undone.")
+        cc1, cc2 = st.columns(2)
+        if cc1.button("✔ Confirm clear all", key="wl_confirm_clear"):
+            clear_watchlist()
+            st.session_state.pop('wl_pending_clear', None)
+            st.rerun()
+        if cc2.button("✘ Cancel", key="wl_cancel_clear"):
+            st.session_state.pop('wl_pending_clear', None)
+            st.rerun()
 
     # ── Filters ───────────────────────────────────────────────────────────────
     fc1, fc2, fc3, fc4, fc5 = st.columns(5)
@@ -196,7 +216,7 @@ def render() -> None:
     _wf_only = fc4.checkbox("Only WF-verified", key="wl_f_wf")
     _dedup   = fc5.checkbox(
         "Best params only",
-        value=False,
+        value=True,
         key="tab12_dedup",
         help=(
             "Collapses multiple parameter sets for the same pair to a single row — "
@@ -241,6 +261,11 @@ def render() -> None:
             f"({_n_collapsed} duplicate param set{'s' if _n_collapsed != 1 else ''} hidden). "
             f"Uncheck 'Best params only' to see all {_n_total_filtered} entries."
         )
+        # Auto-select the top-ranked entry when dedup activates
+        _dedup_ids = [e.get("id") for e in filtered]
+        if st.session_state.get("tab12_selected_id") not in _dedup_ids:
+            st.session_state["tab12_selected_id"]    = _dedup_ids[0] if _dedup_ids else None
+            st.session_state["tab12_selected_entry"] = dict(filtered[0]) if filtered else None
 
     # ── Table ─────────────────────────────────────────────────────────────────
     tbl_df = _build_table_df(filtered, wf_cache)
@@ -265,16 +290,46 @@ def render() -> None:
 
     st.divider()
 
-    # ── Entry selector ────────────────────────────────────────────────────────
-    _pair_opts = [f"{e['long']}/{e['short']} — E{e['entry_sd']} X{e['exit_sd']} V{e['vol_window']}"
-                  for e in filtered]
-    _sel_idx = st.selectbox(
+    # ── Entry selector ─────────────────────────────────────────────────────────
+    _display_ids = [e.get("id", "") for e in filtered]
+    _filter_hash = hash((_ac_filter, _dir_filter, _search, _wf_only, _dedup))
+    _stored_hash = st.session_state.get("tab12_filter_hash")
+    _stored_id   = st.session_state.get("tab12_selected_id")
+    _widget_idx  = st.session_state.get("tab12_pair_select", 0)
+
+    if _filter_hash != _stored_hash:
+        # Filters changed — relocate the selected pair to its new index, or snap to top
+        if _stored_id in _display_ids:
+            _sel_idx = _display_ids.index(_stored_id)
+        else:
+            _sel_idx = 0
+            st.session_state["tab12_selected_id"] = _display_ids[0] if _display_ids else None
+    else:
+        # No filter change — widget reflects the user's pair selection, trust it
+        if isinstance(_widget_idx, int) and 0 <= _widget_idx < len(filtered):
+            _sel_idx = _widget_idx
+            st.session_state["tab12_selected_id"] = filtered[_widget_idx].get("id")
+        elif _stored_id in _display_ids:
+            _sel_idx = _display_ids.index(_stored_id)
+        else:
+            _sel_idx = 0
+
+    st.session_state["tab12_filter_hash"] = _filter_hash
+    st.session_state["tab12_pair_select"] = _sel_idx
+
+    _chosen_idx = st.selectbox(
         "Select pair for actions",
-        range(len(_pair_opts)),
-        format_func=lambda i: _pair_opts[i],
-        key="wl_sel",
+        options=range(len(filtered)),
+        index=_sel_idx,
+        format_func=lambda i: (
+            f"{filtered[i]['long']}/{filtered[i]['short']} — "
+            f"E{filtered[i]['entry_sd']} X{filtered[i]['exit_sd']} V{filtered[i]['vol_window']}"
+        ),
+        key="tab12_pair_select",
     )
-    entry = filtered[_sel_idx]
+    entry = filtered[_chosen_idx]
+    st.session_state["tab12_selected_id"]    = entry.get("id")
+    st.session_state["tab12_selected_entry"] = dict(entry)
 
     # ── Detail panel ─────────────────────────────────────────────────────────
     with st.container(border=True):
@@ -284,7 +339,7 @@ def render() -> None:
         d1.metric("Pair",       f"{entry['long']} / {entry['short']}")
         d2.metric("Best Dir",   sm.get('best_dir', '—'))
         d3.metric("WT Trades",  sm.get('trades_wt', '—'))
-        d4.metric("WT Avg Net", f"{sm['avg_net_wt']:+.4f}" if sm.get('avg_net_wt') is not None else '—')
+        d4.metric("WT Avg Net", f"{sm['avg_net_wt']*100:+.2f}%" if sm.get('avg_net_wt') is not None else '—')
         d5.metric("WF Status",  _wf_status)
 
         st.caption(
@@ -348,7 +403,11 @@ def render() -> None:
         if ab2.button("→ Stake Calc", key=f"wl_to_sc_{entry['id']}"):
             st.session_state['sc_long_pending']  = [entry['long']]
             st.session_state['sc_short_pending'] = [entry['short']]
-            st.session_state['sidebar_nav_pending']      = "🧮 Stake Calc"
+            _best_dir = (entry.get('scan_metrics') or {}).get('best_dir', 'WT')
+            st.session_state['tab3_direction'] = (
+                "CT — Counter-Trend" if _best_dir == "CT" else "WT — With-Trend"
+            )
+            st.session_state['sidebar_nav_pending'] = "🧮 Stake Calc"
             st.rerun()
 
         if ab3.button("→ Walk-Forward", key=f"wl_to_wf_{entry['id']}"):
@@ -418,7 +477,7 @@ def render() -> None:
                 rc1, rc2, rc3, rc4 = st.columns(4)
                 rc1.metric("Result",     _cr.get('recommendation', '—'))
                 rc2.metric("Stable %",   f"{_cr.get('stable_pct', 0):.0f}%")
-                rc3.metric("Avg OOS Net",f"{_cr['avg_oos_net']:+.4f}" if _cr.get('avg_oos_net') is not None else '—')
+                rc3.metric("Avg OOS Net",f"{_cr['avg_oos_net']*100:+.2f}%" if _cr.get('avg_oos_net') is not None else '—')
                 rc4.metric("Consistency",f"{_cr['consistency_score']:.2f}" if _cr.get('consistency_score') is not None else '—')
                 st.caption(f"Last run: {_cr.get('run_at', '—')}")
 

@@ -146,10 +146,36 @@ def render() -> None:
         if _pk in st.session_state:
             st.session_state[_k] = st.session_state.pop(_pk)
 
-    pair_choices = ['— Custom pair —'] + [f"{p.name} ({p.id})" for p in portfolio.open_positions]
+    from data_watchlist import load_watchlist as _load_wl
+    _wl_entries = _load_wl()
+    _wl_choices = [
+        f"★ {e['long']} / {e['short']}  E{e['entry_sd']} X{e['exit_sd']} V{e['vol_window']}"
+        for e in _wl_entries
+    ]
+    _wl_map: dict[str, dict] = dict(zip(_wl_choices, _wl_entries))
+
+    pair_choices = (
+        ['— Custom pair —']
+        + _wl_choices
+        + [f"{p.name} ({p.id})" for p in portfolio.open_positions]
+    )
     if st.session_state.get('pa_pair') not in pair_choices:
         st.session_state['pa_pair'] = '— Custom pair —'
     pair_choice = st.selectbox("Pair", pair_choices, key="pa_pair")
+
+    # Pre-populate sliders when a new watchlist entry is selected
+    _wl_entry = _wl_map.get(pair_choice)
+    if _wl_entry:
+        _wl_id = _wl_entry.get('id', pair_choice)
+        if st.session_state.get('pa_wl_id') != _wl_id:
+            _rv = int(_wl_entry.get('vol_window', 262))
+            st.session_state['pa_vol']          = max(50,  min(520, ((_rv + 5) // 10) * 10))
+            st.session_state['pa_xing']         = max(1.0, min(3.0, round(float(_wl_entry.get('entry_sd', 2.0)), 1)))
+            st.session_state['pa_exit']         = max(0.0, min(1.5, round(float(_wl_entry.get('exit_sd', 1.0)), 1)))
+            st.session_state['pa_trend_window'] = max(130, min(756, int(_wl_entry.get('trend_window', 262))))
+            st.session_state['pa_wl_id']        = _wl_id
+    else:
+        st.session_state.pop('pa_wl_id', None)
 
     basket = None
     open_pos: Position | None = None
@@ -174,6 +200,13 @@ def render() -> None:
             except ValueError as e:
                 st.error(str(e))
                 basket = None
+    elif _wl_entry:
+        try:
+            basket = Basket(long_legs=[_wl_entry['long']], short_legs=[_wl_entry['short']])
+            basket.validate()
+        except ValueError as e:
+            st.error(str(e))
+            basket = None
     else:
         for p in portfolio.open_positions:
             if pair_choice.endswith(f"({p.id})"):
@@ -193,6 +226,22 @@ def render() -> None:
 
     if basket is None:
         return
+
+    _, _wf_btn_col = st.columns([4, 1])
+    if _wf_btn_col.button("📤 Send to Walk-Forward", key="pa_send_wf"):
+        _tmode = (_wl_entry.get('trend_mode', 'Both passes') if _wl_entry else 'Both passes')
+        st.session_state['wf_pair'] = {
+            'long':         list(basket.long_legs),
+            'short':        list(basket.short_legs),
+            'vol_window':   int(vol_window),
+            'entry_sd':     float(xing_sd),
+            'exit_sd':      float(exit_sd),
+            'trend_window': int(pa_trend_window),
+            'trend_mode':   _tmode,
+            'source':       'tab2',
+        }
+        st.session_state['sidebar_nav_pending'] = "🔀 Walk-Forward"
+        st.rerun()
 
     try:
         pa_sig = _cached_pair_signal(
@@ -353,8 +402,8 @@ def render() -> None:
                         s = _agg_bt(raw_t, n, _bt_scp, _bt_fin, _bt_nl)
                         col.metric("Gross WR",  f"{s.get('gross_wr',    0.0):.1%}")
                         col.metric("Net WR",    f"{s.get('net_wr',      0.0):.1%}")
-                        col.metric("Avg gross", f"{s.get('avg_gross',   0.0):+.4f}")
-                        col.metric("Avg net",   f"{s.get('avg_net',     0.0):+.4f}")
+                        col.metric("Avg gross", f"{s.get('avg_gross',   0.0)*100:+.2f}%")
+                        col.metric("Avg net",   f"{s.get('avg_net',     0.0)*100:+.2f}%")
                         col.metric("Avg hold",  f"{s.get('avg_holding', 0.0):.0f}d")
                         return float(s.get('avg_net', 0.0))
 
@@ -377,24 +426,10 @@ def render() -> None:
                     bc1.metric("Trades",      f"{_bt_n:,}")
                     bc1.metric("Avg holding", f"{bt['avg_holding']:.0f}d")
                     bc2.metric("Gross WR",    f"{bt['gross_wr']:.1%}")
-                    bc2.metric("Avg gross",   f"{bt['avg_gross']:+.4f}")
+                    bc2.metric("Avg gross",   f"{bt['avg_gross']*100:+.2f}%")
                     bc3.metric("Net WR",      f"{bt['net_wr']:.1%}")
-                    bc3.metric("Avg net",     f"{bt['avg_net']:+.4f}")
+                    bc3.metric("Avg net",     f"{bt['avg_net']*100:+.2f}%")
 
-                st.markdown("---")
-                if st.button("→ Validate in Walk-Forward", key="tab2_send_wf"):
-                    st.session_state['wf_pair'] = {
-                        'long':          list(basket.long_legs),
-                        'short':         list(basket.short_legs),
-                        'vol_window':    int(vol_window),
-                        'entry_sd':      float(xing_sd),
-                        'exit_sd':       float(exit_sd),
-                        'trend_window':  int(pa_trend_window),
-                        'trend_mode':    'Both passes',
-                        'source':        'tab2',
-                    }
-                    st.session_state['sidebar_nav_pending'] = "🔀 Walk-Forward"
-                    st.rerun()
 
     except Exception as e:
         st.error(f"Signal computation failed: {e}")

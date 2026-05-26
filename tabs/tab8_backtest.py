@@ -13,7 +13,7 @@ from engine.backtest import (
 )
 from engine.numba_core import COL_ENTRY_IDX, COL_SIDE
 from engine.scoring import SCORING_MODES
-from asset_configs import ASSET_CLASSES, ASSET_CLASS_OPTIONS, FI_EXCLUDE, get_spread_cost_lookup
+from asset_configs import ASSET_CLASSES, ASSET_CLASS_OPTIONS, FI_EXCLUDE, COMMODITY_EXCLUDE, _DEFAULT_SCORING_MODE, get_spread_cost_lookup
 from tabs.shared import _CACHE_DIR, _tbl
 
 
@@ -211,7 +211,7 @@ def _bt8_render_results(cache: dict) -> None:
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Top Trades",   f"{int(_top.get('Trades', 0)):,}")
     m2.metric("Win Rate",     f"{float(_top.get('WinRate', 0)):.1%}")
-    m3.metric("Expectancy",   f"{float(_top.get('Expectancy', 0)):.3f}")
+    m3.metric("Expectancy",   f"{float(_top.get('Expectancy', 0))*100:+.2f}%")
     m4.metric("Avg Holding",  f"{float(_top.get('AvgHolding', 0)):.0f}d")
     m5.metric("Payoff Ratio", f"{float(_top.get('PayoffRatio', 0)):.2f}")
 
@@ -262,7 +262,7 @@ def _bt8_render_both_passes(df: pd.DataFrame, params: dict, ac_long: str, ac_sho
             for _c in ['AvgNet_WT', 'AvgNet_CT']:
                 if _c in _tbl_df.columns:
                     _tbl_df[_c] = _tbl_df[_c].apply(
-                        lambda v: f'{v:+.4f}' if not (isinstance(v, float) and np.isnan(v)) else '—'
+                        lambda v: f'{v*100:+.2f}%' if not (isinstance(v, float) and np.isnan(v)) else '—'
                     )
             for _c in ['AvgHold_WT', 'AvgHold_CT']:
                 if _c in _tbl_df.columns:
@@ -299,6 +299,10 @@ def _bt8_render_standard(df: pd.DataFrame, params: dict, ac_long: str, ac_short:
             _disp[_c] = _disp[_c].apply(
                 lambda v: f'{v:.0%}' if not (isinstance(v, float) and np.isnan(v)) else '—'
             )
+        elif _c in ('Expectancy', 'NetExpectancy'):
+            _disp[_c] = _disp[_c].map(lambda v: f'{v*100:+.2f}%')
+        elif _c == 'EstCost':
+            _disp[_c] = _disp[_c].map('{:.3%}'.format)
         else:
             _disp[_c] = _disp[_c].map('{:.3f}'.format)
     _tbl(_disp, show_index=True)
@@ -369,6 +373,12 @@ def _render_intra_asset() -> None:
                                        index=2, key='bt_window')
         bt_window_days  = bt_window_opts[bt_window_label] or None
 
+    # Auto-default scoring mode when asset class changes
+    _prev_bt_asset = st.session_state.get('bt_asset_prev')
+    if _prev_bt_asset != asset_key and asset_key in _DEFAULT_SCORING_MODE:
+        st.session_state['bt_scoring_mode'] = _DEFAULT_SCORING_MODE[asset_key]
+    st.session_state['bt_asset_prev'] = asset_key
+
     bt_score_col, _ = st.columns([2, 2])
     with bt_score_col:
         bt_scoring_mode = st.selectbox(
@@ -376,6 +386,12 @@ def _render_intra_asset() -> None:
             list(SCORING_MODES.keys()),
             format_func=lambda x: SCORING_MODES[x],
             key='bt_scoring_mode',
+        )
+    _bt_rec = _DEFAULT_SCORING_MODE.get(asset_key)
+    if _bt_rec and bt_scoring_mode != _bt_rec:
+        st.warning(
+            f"⚠️ Walk-forward suggests **{SCORING_MODES[_bt_rec]}** "
+            f"for {dict(ASSET_CLASS_OPTIONS)[asset_key]} pairs."
         )
 
     st.markdown("---")
@@ -400,6 +416,10 @@ def _render_intra_asset() -> None:
             except Exception as e:
                 st.error(f"Failed to load prices: {e}")
                 return
+
+        if asset_key == 'commodities':
+            _instruments_bt = [i for i in _instruments_bt if i not in COMMODITY_EXCLUDE]
+            _prices_bt = _prices_bt[[c for c in _prices_bt.columns if c not in COMMODITY_EXCLUDE]]
 
         with st.spinner("Preparing returns…"):
             _scaled_bt, _day_ints_bt, _index_bt = prepare_returns(
@@ -515,10 +535,27 @@ def _render_cross_asset() -> None:
         _ca_sample = st.number_input(
             "Sample size (0 = exhaustive)", 0, 20000, 0, key='bt_ca_sample',
         )
+        # Auto-default scoring mode when either asset class changes
+        _prev_ca_long  = st.session_state.get('bt_ca_long_prev')
+        _prev_ca_short = st.session_state.get('bt_ca_short_prev')
+        if _prev_ca_long != _long_class or _prev_ca_short != _short_class:
+            if 'commodities' in (_long_class, _short_class):
+                st.session_state['bt_ca_scoring'] = _DEFAULT_SCORING_MODE.get('commodities', 'contrarian')
+            else:
+                st.session_state['bt_ca_scoring'] = 'composite'
+        st.session_state['bt_ca_long_prev']  = _long_class
+        st.session_state['bt_ca_short_prev'] = _short_class
         _ca_scoring = st.selectbox(
             "Scoring mode", list(SCORING_MODES.keys()),
             format_func=lambda x: SCORING_MODES[x], key='bt_ca_scoring',
         )
+        if 'commodities' in (_long_class, _short_class):
+            _ca_rec = _DEFAULT_SCORING_MODE.get('commodities')
+            if _ca_rec and _ca_scoring != _ca_rec:
+                st.warning(
+                    f"⚠️ Walk-forward suggests **{SCORING_MODES[_ca_rec]}** "
+                    "when either side includes Commodities."
+                )
 
     st.markdown("---")
     _ca_run = st.button("▶ Run cross-asset search", type="primary",
@@ -535,6 +572,10 @@ def _render_cross_asset() -> None:
             _ca_prices, _ca_long_i, _ca_short_i, _ = load_cross_asset_prices(
                 _long_class, _short_class, _CACHE_DIR,
             )
+        if _long_class == 'commodities':
+            _ca_long_i = [i for i in _ca_long_i if i not in COMMODITY_EXCLUDE]
+        if _short_class == 'commodities':
+            _ca_short_i = [i for i in _ca_short_i if i not in COMMODITY_EXCLUDE]
         st.info(
             f"Loaded {len(_ca_long_i)} {_long_class} + "
             f"{len(_ca_short_i)} {_short_class} instruments. "

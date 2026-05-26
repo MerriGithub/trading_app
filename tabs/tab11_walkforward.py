@@ -7,7 +7,7 @@ import streamlit as st
 
 from engine.backtest import prepare_returns, run_backtest, aggregate_trades
 from engine.numba_core import COL_ENTRY_IDX, COL_SIDE
-from asset_configs import ASSET_CLASSES
+from asset_configs import ASSET_CLASSES, _DEFAULT_SCORING_MODE
 from tabs.shared import registry, _tbl, ALL_INSTRUMENTS, ALL_DISPLAY
 
 
@@ -258,17 +258,25 @@ def _wf_summary(df: pd.DataFrame) -> dict:
 
 
 def _batch_result_to_watchlist_entry(r: dict) -> dict:
-    _wfm = r.get('wf_metrics', {})
+    _wfm  = r.get('wf_metrics', {})
+    _ac_l = r.get('asset_class_long', '')
+    _ac_s = r.get('asset_class_short', '')
+    _mode = (
+        _DEFAULT_SCORING_MODE.get('commodities', 'contrarian')
+        if 'commodities' in (_ac_l, _ac_s)
+        else _DEFAULT_SCORING_MODE.get(_ac_l, 'composite')
+    )
     return {
         'long':              r['long'],
         'short':             r['short'],
-        'asset_class_long':  r.get('asset_class_long', ''),
-        'asset_class_short': r.get('asset_class_short', ''),
+        'asset_class_long':  _ac_l,
+        'asset_class_short': _ac_s,
         'entry_sd':          r['entry_sd'],
         'exit_sd':           r['exit_sd'],
         'vol_window':        r['vol_window'],
         'trend_window':      r['trend_window'],
         'trend_mode':        r['trend_mode'],
+        'scoring_mode':      _mode,
         'source':            'batch_wf',
         'scan_metrics':      r.get('scan_metrics', {}),
         'wf_metrics': {
@@ -575,7 +583,7 @@ def render() -> None:
             'Vol':         _r['vol_window'],
             'Trend Win':   _r['trend_window'],
             'Stable %':    f"{_m['stable_pct']:.0f}%" if not _err else '—',
-            'Avg OOS Net': f"{_m['avg_oos_net']:+.4f}" if _m.get('avg_oos_net') is not None else '—',
+            'Avg OOS Net': f"{_m['avg_oos_net']*100:+.2f}%" if _m.get('avg_oos_net') is not None else '—',
             'Consistency': f"{_m['consistency_score']:.2f}" if _m.get('consistency_score') is not None else '—',
             'Verdict':     _m.get('recommendation', '—') + (f" ⚠️ {_err}" if _err else ''),
         })

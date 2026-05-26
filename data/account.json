@@ -2,6 +2,12 @@
   "starting_capital": 10000.0,
   "margin": 0.10,
   "spread_cost_fallback": 0.001,
+  "margin_rates": {
+    "fx":           0.0333,
+    "equity":       0.0500,
+    "commodities":  0.1000,
+    "fixed_income": 0.0500
+  },
   "active_broker_profile": "ig_spreadbet",
   "financing": {
     "equity": {

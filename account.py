@@ -20,6 +20,12 @@ _DEFAULTS = {
         'commodities':  {'long_rate': 0.0488, 'short_rate': 0.0088},
         'fixed_income': {'long_rate': 0.0488, 'short_rate': 0.0088},
     },
+    'margin_rates': {
+        'fx':           0.0333,   # IG SB/CFD: 1:30 leverage
+        'equity':       0.0500,   # IG SB/CFD: 1:20 leverage
+        'commodities':  0.1000,   # IG SB/CFD: 1:10 leverage
+        'fixed_income': 0.0500,   # IG SB/CFD: 1:20 leverage
+    },
 }
 
 
@@ -79,6 +85,16 @@ def get_starting_capital() -> float:
 
 def get_margin() -> float:
     return load_account().get('margin', _DEFAULTS['margin'])
+
+
+def get_margin_rate(asset_class: str) -> float:
+    """
+    Return the IG margin rate for a given asset class.
+    Falls back to get_margin() (flat rate) if asset class not found.
+    """
+    acct = load_account()
+    rates = acct.get('margin_rates', _DEFAULTS['margin_rates'])
+    return float(rates.get(asset_class.lower(), get_margin()))
 
 
 def save_account(data: dict) -> None:

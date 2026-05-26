@@ -68,18 +68,26 @@ FX = {
         'USDCAD', 'EURGBP', 'EURJPY', 'GBPJPY', 'EURCHF', 'AUDNZD',
     ]},
     'instruments': {
-        'EURUSD': {'display': 'EUR/USD', 'data_source': 'csv', 'intraday_ticker': 'EURUSD=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'USD'},
-        'GBPUSD': {'display': 'GBP/USD', 'data_source': 'csv', 'intraday_ticker': 'GBPUSD=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'USD'},
-        'USDJPY': {'display': 'USD/JPY', 'data_source': 'csv', 'intraday_ticker': 'USDJPY=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'JPY'},
-        'USDCHF': {'display': 'USD/CHF', 'data_source': 'csv', 'intraday_ticker': 'USDCHF=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'CHF'},
-        'AUDUSD': {'display': 'AUD/USD', 'data_source': 'csv', 'intraday_ticker': 'AUDUSD=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'USD'},
-        'NZDUSD': {'display': 'NZD/USD', 'data_source': 'csv', 'intraday_ticker': 'NZDUSD=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'USD'},
-        'USDCAD': {'display': 'USD/CAD', 'data_source': 'csv', 'intraday_ticker': 'USDCAD=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'CAD'},
-        'EURGBP': {'display': 'EUR/GBP', 'data_source': 'csv', 'intraday_ticker': 'EURGBP=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'GBP'},
-        'EURJPY': {'display': 'EUR/JPY', 'data_source': 'csv', 'intraday_ticker': 'EURJPY=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'JPY'},
-        'GBPJPY': {'display': 'GBP/JPY', 'data_source': 'csv', 'intraday_ticker': 'GBPJPY=X', 'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'JPY'},
-        'EURCHF': {'display': 'EUR/CHF', 'data_source': 'csv', 'intraday_ticker': 'EURCHF=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'CHF'},
-        'AUDNZD': {'display': 'AUD/NZD', 'data_source': 'csv', 'intraday_ticker': 'AUDNZD=X', 'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'NZD'},
+        # IG FX spreadbet convention: price expressed in pips for margin calculation.
+        # 4-decimal pairs (non-JPY): IG price = Yahoo rate × 10000
+        # JPY pairs: IG price = Yahoo rate × 100
+        #
+        # IG CFD contract specs (confirmed 2026-05-23):
+        # Non-JPY majors: 1 contract = $10/point at 5dp pricing → cfd_contract_size = 10, cfd_currency = USD/GBP
+        # JPY pairs: contract size unverified — left at 100000 (lot size) pending confirmation.
+        # Source: IG platform deal ticket.
+        'EURUSD': {'display': 'EUR/USD', 'data_source': 'csv', 'intraday_ticker': 'EURUSD=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 10, 'cfd_currency': 'USD', 'cfd_price_dp': 5, 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price': 10850,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 10000, 1)},
+        'GBPUSD': {'display': 'GBP/USD', 'data_source': 'csv', 'intraday_ticker': 'GBPUSD=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 10, 'cfd_currency': 'USD', 'cfd_price_dp': 5, 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price': 12700,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 10000, 1)},
+        'USDJPY': {'display': 'USD/JPY', 'data_source': 'csv', 'intraday_ticker': 'USDJPY=X', 'spread_pct': 0.0001,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'JPY', 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price': 14500,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 100,   1)},
+        'USDCHF': {'display': 'USD/CHF', 'data_source': 'csv', 'intraday_ticker': 'USDCHF=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 10, 'cfd_currency': 'CHF', 'cfd_price_dp': 5, 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price':  8900,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 10000, 1)},
+        'AUDUSD': {'display': 'AUD/USD', 'data_source': 'csv', 'intraday_ticker': 'AUDUSD=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 10, 'cfd_currency': 'USD', 'cfd_price_dp': 5, 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price':  6400,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 10000, 1)},
+        'NZDUSD': {'display': 'NZD/USD', 'data_source': 'csv', 'intraday_ticker': 'NZDUSD=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 10, 'cfd_currency': 'USD', 'cfd_price_dp': 5, 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price':  5900,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 10000, 1)},
+        'USDCAD': {'display': 'USD/CAD', 'data_source': 'csv', 'intraday_ticker': 'USDCAD=X', 'spread_pct': 0.00015, 'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 10, 'cfd_currency': 'CAD', 'cfd_price_dp': 5, 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price': 13600,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 10000, 1)},
+        'EURGBP': {'display': 'EUR/GBP', 'data_source': 'csv', 'intraday_ticker': 'EURGBP=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 10, 'cfd_currency': 'GBP', 'cfd_price_dp': 5, 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price':  8550,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 10000, 1)},
+        'EURJPY': {'display': 'EUR/JPY', 'data_source': 'csv', 'intraday_ticker': 'EURJPY=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'JPY', 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price': 11750,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 100,   1)},
+        'GBPJPY': {'display': 'GBP/JPY', 'data_source': 'csv', 'intraday_ticker': 'GBPJPY=X', 'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 100000.0, 'cfd_currency': 'JPY', 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price': 16150,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 100,   1)},
+        'EURCHF': {'display': 'EUR/CHF', 'data_source': 'csv', 'intraday_ticker': 'EURCHF=X', 'spread_pct': 0.0002,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 10, 'cfd_currency': 'CHF', 'cfd_price_dp': 5, 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price':  9500,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 10000, 1)},
+        'AUDNZD': {'display': 'AUD/NZD', 'data_source': 'csv', 'intraday_ticker': 'AUDNZD=X', 'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'G10', 'cfd_contract_size': 10, 'cfd_currency': 'NZD', 'cfd_price_dp': 5, 'cfd_min_contracts': 0.5, 'ig_price_override': True, 'ig_default_price': 10850,  'ig_price_unit': 'pips', 'ig_price_conversion': lambda p: round(p * 10000, 1)},
     },
 }
 
@@ -105,14 +113,64 @@ COMMODITIES = {
         # Energy
         'WTI':       {'display': 'WTI Crude',    'data_source': 'csv', 'intraday_ticker': 'CL=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Energy',      'cfd_contract_size':    1000.0, 'cfd_currency': 'USD'},
         'BRENT':     {'display': 'Brent Crude',  'data_source': 'csv', 'intraday_ticker': 'BZ=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Energy',      'cfd_contract_size':    1000.0, 'cfd_currency': 'USD'},
-        'NATGAS':    {'display': 'Natural Gas',  'data_source': 'csv', 'intraday_ticker': 'NG=F',  'spread_pct': 0.0020,  'point_size': 1.0, 'sector': 'Energy',      'cfd_contract_size':   10000.0, 'cfd_currency': 'USD'},
+        'NATGAS':    {
+            'display': 'Natural Gas',  'data_source': 'csv', 'intraday_ticker': 'NG=F',
+            'spread_pct': 0.0020,  'point_size': 1.0, 'sector': 'Energy',
+            'cfd_contract_size': 10000.0, 'cfd_currency': 'USD',
+            'ig_price_override': True,
+            'ig_default_price':  80.0,
+            'ig_market_name':    'Natural Gas (pence per therm)',
+            'ig_price_unit':     'pence_per_therm',
+        },
         # Precious metals
-        'GOLD':      {'display': 'Gold',         'data_source': 'csv', 'intraday_ticker': 'GC=F',  'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'Precious',    'cfd_contract_size':     100.0, 'cfd_currency': 'USD'},
-        'SILVER':    {'display': 'Silver',       'data_source': 'csv', 'intraday_ticker': 'SI=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Precious',    'cfd_contract_size':    5000.0, 'cfd_currency': 'USD'},
-        'PLATINUM':  {'display': 'Platinum',     'data_source': 'csv', 'intraday_ticker': 'PL=F',  'spread_pct': 0.0010,  'point_size': 1.0, 'sector': 'Precious',    'cfd_contract_size':      50.0, 'cfd_currency': 'USD'},
+        'GOLD':      {
+            'display': 'Gold',         'data_source': 'csv', 'intraday_ticker': 'GC=F',
+            'spread_pct': 0.0003,  'point_size': 1.0, 'sector': 'Precious',
+            'cfd_contract_size': 100.0, 'cfd_currency': 'USD',
+            'ig_price_override': True,
+            'ig_default_price':  3500.0,
+            'ig_market_name':    'Gold (£ per troy oz)',
+            'ig_price_unit':     'GBP_per_oz',
+        },
+        'SILVER':    {
+            'display': 'Silver',       'data_source': 'csv', 'intraday_ticker': 'SI=F',
+            'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Precious',
+            'cfd_contract_size': 5000.0, 'cfd_currency': 'USD',
+            'ig_price_override': True,
+            'ig_default_price':  5500.0,
+            'ig_market_name':    'Silver (pence per troy oz)',
+            'ig_price_unit':     'pence_per_oz',
+        },
+        'PLATINUM':  {
+            'display': 'Platinum',     'data_source': 'csv', 'intraday_ticker': 'PL=F',
+            'spread_pct': 0.0010,  'point_size': 1.0, 'sector': 'Precious',
+            'cfd_contract_size': 50.0, 'cfd_currency': 'USD',
+            'ig_price_override': True,
+            'ig_default_price':  1500.0,
+            'ig_market_name':    'Platinum (£ per troy oz)',
+            'ig_price_unit':     'GBP_per_oz',
+        },
         # Industrial metals
-        'COPPER':    {'display': 'Copper',       'data_source': 'csv', 'intraday_ticker': 'HG=F',  'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Industrial',  'cfd_contract_size':   25000.0, 'cfd_currency': 'USD'},
-        'PALLADIUM': {'display': 'Palladium',    'data_source': 'csv', 'intraday_ticker': 'PA=F',  'spread_pct': 0.0015,  'point_size': 1.0, 'sector': 'Industrial',  'cfd_contract_size':     100.0, 'cfd_currency': 'USD'},
+        'COPPER':    {
+            'display': 'Copper',       'data_source': 'csv', 'intraday_ticker': 'HG=F',
+            'spread_pct': 0.0005,  'point_size': 1.0, 'sector': 'Industrial',
+            'cfd_contract_size': 25000.0, 'cfd_currency': 'USD',
+            'spreadbet_min_stake': 0.04,
+            'margin_rate':         0.05,
+            'ig_price_override':   True,
+            'ig_default_price':    63975.0,
+            'ig_market_name':      'Copper (pence per tonne)',
+            'ig_price_unit':       'pence_per_tonne',
+        },
+        'PALLADIUM': {
+            'display': 'Palladium',    'data_source': 'csv', 'intraday_ticker': 'PA=F',
+            'spread_pct': 0.0015,  'point_size': 1.0, 'sector': 'Industrial',
+            'cfd_contract_size': 100.0, 'cfd_currency': 'USD',
+            'ig_price_override': True,
+            'ig_default_price':  1100.0,
+            'ig_market_name':    'Palladium (£ per troy oz)',
+            'ig_price_unit':     'GBP_per_oz',
+        },
         # Agriculture
         'WHEAT':     {'display': 'Wheat',        'data_source': 'csv', 'intraday_ticker': 'ZW=F',  'spread_pct': 0.0010,  'point_size': 1.0, 'sector': 'Agriculture', 'cfd_contract_size':    5000.0, 'cfd_currency': 'USD'},
         'CORN':      {'display': 'Corn',         'data_source': 'csv', 'intraday_ticker': 'ZC=F',  'spread_pct': 0.0008,  'point_size': 1.0, 'sector': 'Agriculture', 'cfd_contract_size':    5000.0, 'cfd_currency': 'USD'},
@@ -172,6 +230,27 @@ FIXED_INCOME = {
 
 FI_EXCLUDE = frozenset({'UST10Y', 'UST30Y', 'UST5Y', 'IBTM'})
 
+COMMODITY_EXCLUDE = frozenset({
+    'WTI',  # April 2020 negative price event: daily return ~ −300%
+            # Pathological spread returns distort exhaustive search and walk-forward.
+            # Excluded from: Tab 8 commodity search, Tab 9 walk-forward, Tab 10 scanner.
+            # Individual WTI monitoring (Tab 1/2) is unaffected.
+})
+
+_DEFAULT_SCORING_MODE = {
+    'equity':       'composite',
+    'fx':           'composite',
+    'fixed_income': 'composite',
+    'commodities':  'contrarian',   # WF validated: ρ = +0.122, p = 0.0009
+    'cross_asset':  'composite',    # No WF data yet — neutral default
+}
+
+CROSS_ASSET_COMBINATIONS = [
+    ('commodities', 'fx'),           # Primary — Commodity × FX
+    ('commodities', 'fixed_income'), # Secondary — future
+    ('equity', 'commodities'),       # Secondary — future
+]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # REGISTRY
@@ -189,6 +268,7 @@ ASSET_CLASS_OPTIONS = [
     ('fx',           'FX Pairs'),
     ('commodities',  'Commodities'),
     ('fixed_income', 'Fixed Income'),
+    ('cross_asset',  'Cross-Asset'),
 ]
 
 _KEY_ALIASES: dict[str, str] = {'commodity': 'commodities', 'fi': 'fixed_income'}

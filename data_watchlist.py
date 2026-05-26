@@ -75,6 +75,8 @@ def add_to_watchlist(entry: dict) -> str:
         entry["notes"] = ""
     if "scan_metrics" not in entry:
         entry["scan_metrics"] = {}
+    if "scoring_mode" not in entry:
+        entry["scoring_mode"] = None
 
     entries = load_watchlist()
     idx = next((i for i, e in enumerate(entries) if e.get("id") == eid), None)
@@ -89,6 +91,10 @@ def add_to_watchlist(entry: dict) -> str:
 def remove_from_watchlist(entry_id: str) -> None:
     entries = [e for e in load_watchlist() if e.get("id") != entry_id]
     save_watchlist(entries)
+
+
+def clear_watchlist() -> None:
+    save_watchlist([])
 
 
 def update_notes(entry_id: str, notes: str) -> None:

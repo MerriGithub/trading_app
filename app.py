@@ -6,6 +6,12 @@ from __future__ import annotations
 
 import streamlit as st
 
+try:
+    import data_refresh as _dr
+    _HAS_DR = True
+except ImportError:
+    _HAS_DR = False
+
 from tabs.shared import portfolio, registry, _check_signal_alerts
 import tabs.tab1_monitor      as tab1
 import tabs.tab2_pair_analysis as tab2
@@ -32,6 +38,19 @@ if 'pending_close' not in st.session_state:
     st.session_state['pending_close'] = None
 if 'leg_count' not in st.session_state:
     st.session_state['leg_count'] = 1
+
+# ── Data auto-refresh (once per session) ─────────────────────────────────────
+if _HAS_DR and 'data_refresh_checked' not in st.session_state:
+    st.session_state['data_refresh_checked'] = True
+    try:
+        if _dr.any_file_stale():
+            _refresh_results = _dr.refresh_all()
+            _refreshed = [r for r in _refresh_results if r['status'] == 'updated']
+            if _refreshed:
+                st.cache_data.clear()
+                st.session_state['data_refresh_banner'] = _refreshed
+    except Exception:
+        pass
 
 # ── Alert pre-computation (once per page load) ────────────────────────────────
 if 'signal_alerts' not in st.session_state:
@@ -75,6 +94,45 @@ with st.sidebar:
         st.caption(f"Open positions: {_open_n}")
     except Exception:
         pass
+
+    if _HAS_DR:
+        st.markdown("---")
+        st.markdown("**Data**")
+        try:
+            _staleness = _dr.staleness_summary()
+            _labels = {
+                'prices.csv':           'Equity',
+                'fx_prices.csv':        'FX',
+                'commodity_prices.csv': 'Commodity',
+            }
+            for _fname, _last in _staleness.items():
+                _lbl = _labels.get(_fname, _fname)
+                if _last is None:
+                    st.caption(f"🔴 {_lbl}: no data")
+                elif _dr.is_stale(_fname):
+                    st.caption(f"🟡 {_lbl}: {_last}")
+                else:
+                    st.caption(f"🟢 {_lbl}: {_last}")
+        except Exception:
+            pass
+        if st.button("🔄 Refresh data", key="sidebar_refresh_btn"):
+            with st.spinner("Refreshing…"):
+                try:
+                    _res = _dr.refresh_all()
+                    _refreshed = [r for r in _res if r['status'] == 'updated']
+                    if _refreshed:
+                        st.cache_data.clear()
+                        st.session_state['data_refresh_banner'] = _refreshed
+                except Exception as _e:
+                    st.error(f"Refresh failed: {_e}")
+            st.rerun()
+        if 'data_refresh_banner' in st.session_state:
+            _banner = st.session_state['data_refresh_banner']
+            _names = [_labels.get(r['filename'], r['filename']) for r in _banner]
+            st.info(f"Auto-refreshed: {', '.join(_names)}")
+            if st.button("✕ Dismiss", key="dismiss_refresh_banner"):
+                del st.session_state['data_refresh_banner']
+                st.rerun()
 
 if _active_tab == _TABS[0]:    # Monitor
     tab1.render()
