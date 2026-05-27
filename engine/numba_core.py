@@ -126,7 +126,7 @@ COL_GROSS_RETURN = 3
 COL_HOLDING_DAYS = 4
 
 
-def _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints):
+def _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days=300):
     """
     Pure-Python crossing signal trade detection.
 
@@ -182,12 +182,13 @@ def _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints):
                 entry_cum = cum[i]
                 side = 1
         else:
-            # Exit when spread reverts past the exit threshold
+            # Exit when spread reverts past the exit threshold, or max hold reached
             # side=+1 (long): entered below -xing_sd, exit when dist >= -exit_sd
             # side=-1 (short): entered above +xing_sd, exit when dist <= exit_sd
             exit_condition = (
                 (side == -1 and d <= exit_sd) or
-                (side == 1 and d >= -exit_sd)
+                (side == 1 and d >= -exit_sd) or
+                (day_ints[i] - day_ints[entry_idx] >= max_hold_days)
             )
             if exit_condition:
                 exit_cum = cum[i]
@@ -210,7 +211,7 @@ def _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints):
 
 if HAS_NUMBA:
     @numba.njit(cache=True)
-    def _numba_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints):
+    def _numba_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days=300):
         """Numba-compiled trade detection.  Identical logic to _ref_ version."""
         T = len(cum)
         max_trades = T // 2 + 1
@@ -241,7 +242,8 @@ if HAS_NUMBA:
             else:
                 exit_cond = (
                     (side == -1 and d <= exit_sd) or
-                    (side == 1 and d >= -exit_sd)
+                    (side == 1 and d >= -exit_sd) or
+                    (day_ints[i] - day_ints[entry_idx] >= max_hold_days)
                 )
                 if exit_cond:
                     exit_cum = cum[i]
@@ -262,18 +264,18 @@ if HAS_NUMBA:
         return trades[:n], n
 
 
-def detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints):
+def detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days=300):
     """Dispatch to Numba if available, else pure Python."""
     if HAS_NUMBA:
-        return _numba_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints)
-    return _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints)
+        return _numba_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days)
+    return _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. SINGLE-SERIES BACKTEST (convenience wrapper)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def backtest_spread(spread_returns, vol_window, xing_sd, exit_sd, day_ints):
+def backtest_spread(spread_returns, vol_window, xing_sd, exit_sd, day_ints, max_hold_days=300):
     """
     Full crossing signal backtest on a single spread return series.
 
@@ -308,7 +310,7 @@ def backtest_spread(spread_returns, vol_window, xing_sd, exit_sd, day_ints):
         if not np.isnan(roll_std[i]) and roll_std[i] > 0:
             dist_sd[i] = (cum[i] - roll_mean[i]) / roll_std[i]
 
-    trades, n_trades = detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints)
+    trades, n_trades = detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days)
     return trades, n_trades, cum, dist_sd
 
 
@@ -327,7 +329,7 @@ BR_PAYOFF_RATIO = 6
 BR_TOTAL_GROSS_PNL = 7
 
 
-def _ref_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints):
+def _ref_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_hold_days=300):
     """
     Pure-Python batch backtest: runs trade detection on each of M spread
     series and aggregates results into a summary array.
@@ -352,7 +354,7 @@ def _ref_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints):
 
     for j in range(M):
         trades, n_trades, _, _ = backtest_spread(
-            spread_mat[:, j], vol_window, xing_sd, exit_sd, day_ints
+            spread_mat[:, j], vol_window, xing_sd, exit_sd, day_ints, max_hold_days
         )
         if n_trades == 0:
             continue
@@ -394,7 +396,7 @@ def _ref_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints):
 
 if HAS_NUMBA:
     @numba.njit(cache=True, parallel=True)
-    def _numba_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints):
+    def _numba_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_hold_days=300):
         """
         Numba-parallel batch backtest.  Uses prange over M columns so each
         combination runs on a separate thread.
@@ -471,7 +473,8 @@ if HAS_NUMBA:
                 else:
                     exit_cond = (
                         (side == -1 and d <= exit_sd) or
-                        (side == 1 and d >= -exit_sd)
+                        (side == 1 and d >= -exit_sd) or
+                        (day_ints[i] - day_ints[entry_idx] >= max_hold_days)
                     )
                     if exit_cond:
                         ec = cum[i]
@@ -522,8 +525,8 @@ if HAS_NUMBA:
         return results
 
 
-def batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints):
+def batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_hold_days=300):
     """Dispatch to Numba-parallel if available, else pure Python."""
     if HAS_NUMBA:
-        return _numba_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints)
-    return _ref_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints)
+        return _numba_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_hold_days)
+    return _ref_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_hold_days)

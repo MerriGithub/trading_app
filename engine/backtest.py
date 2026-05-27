@@ -246,6 +246,7 @@ def run_backtest(
     spread_cost_pct: float = 0.001,
     financing_daily_pct: float = 0.0,
     n_legs: int = 2,
+    max_hold_days: int = 300,
 ) -> dict:
     """
     Run crossing signal backtest on a single spread return series.
@@ -279,7 +280,7 @@ def run_backtest(
         summary     — dict of aggregate statistics
     """
     trades, n_trades, cum, dist_sd = backtest_spread(
-        spread_returns, vol_window, xing_sd, exit_sd, day_ints
+        spread_returns, vol_window, xing_sd, exit_sd, day_ints, max_hold_days
     )
 
     summary = aggregate_trades(
@@ -418,6 +419,7 @@ def run_exhaustive_search(
     seed: int = 42,
     scoring_mode: str = 'composite',
     progress_cb=None,
+    max_hold_days: int = 300,
     # Backward compatibility
     min_legs: int | None = None,
     max_legs: int | None = None,
@@ -552,7 +554,7 @@ def run_exhaustive_search(
                 spread_mat = lr[:, None] - short_rets  # (T, M_short)
 
                 # Batch backtest and spread-shape metrics (same vectorised pass)
-                batch_results  = batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints)
+                batch_results  = batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_hold_days)
                 shape_scores   = _batch_scores(spread_mat)
 
                 # Extract results for valid (non-overlapping) combos only
@@ -705,6 +707,7 @@ def sensitivity_grid(
     financing_rates: list[float] | None = None,
     spread_cost_pct: float = 0.001,
     n_legs: int = 2,
+    max_hold_days: int = 300,
 ) -> pd.DataFrame:
     """
     Run a parameter sweep and return results as a DataFrame.
@@ -725,7 +728,7 @@ def sensitivity_grid(
     for sd in sd_thresholds:
         for ex in exit_targets:
             trades, n_trades, _, _ = backtest_spread(
-                spread_returns, vol_window, sd, ex, day_ints
+                spread_returns, vol_window, sd, ex, day_ints, max_hold_days
             )
             for fin_ann in financing_rates:
                 fin_daily = fin_ann / 100 / 365
