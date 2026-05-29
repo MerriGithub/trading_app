@@ -3,7 +3,21 @@
     "allow": [
       "Skill(obsidian-save)",
       "Skill(obsidian-save:*)",
-      "PowerShell($py = \"C:\\\\Users\\\\gordo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe\"; Set-Location \"C:\\\\Users\\\\gordo\\\\Documents\\\\trading_app\"; & $py -m pytest tests/ -v 2>&1)"
+      "PowerShell($py = \"C:\\\\Users\\\\gordo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe\"; Set-Location \"C:\\\\Users\\\\gordo\\\\Documents\\\\trading_app\"; & $py -m pytest tests/ -v 2>&1)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\gordo\\\\Documents\" -Filter \"*MCP*\" -Recurse -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object FullName)",
+      "mcp__obsidian__search_files",
+      "Bash(find /c/Users/gordo -maxdepth 8 \\\\\\( -name \"*2026-05-26*\" -o -name \"*MCP-Crossing*\" -o -name \"*MCP-Server-Python*\" \\\\\\) 2>/dev/null | head -20)",
+      "Read(//c/Users/gordo/**)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('mcpServers',{}\\), indent=2\\)\\)\")",
+      "mcp__obsidian__read_file",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\gordo\\\\Documents\" -Recurse -Filter \"*MCP-Crossing*\" -ErrorAction SilentlyContinue)",
+      "Bash(pip3 show *)",
+      "Bash(python3 -c \"import numpy; print\\(numpy.__version__\\)\")",
+      "Bash(python3 -c ' *)",
+      "PowerShell(Import-Csv \"c:\\\\Users\\\\gordo\\\\Documents\\\\trading_app\\\\cache\\\\commodity_prices.csv\" | Measure-Object | Select-Object Count; \\(Import-Csv \"c:\\\\Users\\\\gordo\\\\Documents\\\\trading_app\\\\cache\\\\commodity_prices.csv\"\\)[0] | Get-Member -MemberType NoteProperty | Select-Object Name)",
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\gordo\\\\Documents\\\\trading_app\\\\legacy\\\\\" | Where-Object {$_.Name -match \"stop|trail|lock|research\"} | Select-Object Name)",
+      "PowerShell(C:\\\\Users\\\\gordo\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe -c \"import numpy; print\\('numpy OK'\\)\" 2>&1)"
     ]
   }
 }
