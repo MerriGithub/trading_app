@@ -1,0 +1,5 @@
+stall_days,n_baseline,n_stall_fires,pct_fires,mean_stall_step,mean_observed_peak_sd,mean_obs_peak_winners,mean_obs_peak_losers,pct_obs_peak_lt_3.0,pct_obs_peak_lt_3.5
+3,583,582,0.9983,5.0,2.55,2.52,2.62,0.8316,0.9296
+5,583,581,0.9966,8.2,2.64,2.6,2.74,0.7676,0.9053
+7,583,565,0.9691,11.0,2.68,2.63,2.8,0.7434,0.8938
+10,583,554,0.9503,15.6,2.75,2.69,2.88,0.7184,0.8736

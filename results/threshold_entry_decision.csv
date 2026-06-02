@@ -1,0 +1,5 @@
+threshold,n_trades,coverage,avg_net,net_delta,win_rate,avg_hold,avg_entry_dist_sd,pct_max_hold,n_pairs_improved,is_best,verdict
+2.0,677.0,1.0,0.0087,0.0,0.7194,131.0,2.635,0.1699,0,0,
+2.5,465.0,0.6869,0.0103,0.0016,0.7183,139.7,3.314,0.1828,13,0,
+3.0,307.0,0.4535,0.0112,0.0025,0.7003,140.5,4.078,0.1922,13,0,
+3.5,183.0,0.2703,0.0254,0.0167,0.7432,122.4,5.071,0.1475,12,1,FILTER TOO AGGRESSIVE

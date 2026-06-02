@@ -1,0 +1,5 @@
+scenario,weighted_avg_net,vs_baseline
+"Baseline (equal weight, no stop)",0.0089,
+"Extension stop only (equal weight, EXT=4.0)",0.0037,-0.0052
+Position sizing only (no stop),0.0098,0.0009
+Extension stop + position sizing,0.0039,-0.005

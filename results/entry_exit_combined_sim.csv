@@ -1,0 +1,5 @@
+component,avg_net,n_trades,win_rate
+"Baseline (no filter, no PE)",0.0089,680,72.2
+Velocity filter only (V<1.50),0.0058,475,69.1
+Partial exit only (all trades),0.009,680,71.5
+Velocity filter + partial exit,0.0054,475,68.2
