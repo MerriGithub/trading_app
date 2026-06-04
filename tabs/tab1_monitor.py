@@ -10,6 +10,29 @@ from tabs.shared import (
     ALL_DISPLAY, _signal_state_badge,
 )
 
+_NEAR_TARGET_BUFFER = 0.3   # SD units within entry threshold to show NEAR_TARGET
+
+_CANDIDATE_BADGES = {
+    'LONG_ENTRY':  '🟢 Long Entry',
+    'SHORT_ENTRY': '🔴 Short Entry',
+    'NEAR_TARGET': '🟡 Near Target',
+    'IDLE':        '⚪ Idle',
+}
+
+
+def _candidate_state(current_sd: float, entry_sd: float) -> str:
+    """
+    Signal state for a candidate with no open position.
+    exit_sd is irrelevant — there is nothing to exit.
+    """
+    if current_sd <= -entry_sd:
+        return 'LONG_ENTRY'
+    if current_sd >= entry_sd:
+        return 'SHORT_ENTRY'
+    if abs(current_sd) >= entry_sd - _NEAR_TARGET_BUFFER:
+        return 'NEAR_TARGET'
+    return 'IDLE'
+
 
 def _candidate_signal(candidate: dict) -> dict | None:
     try:
@@ -23,7 +46,11 @@ def _candidate_signal(candidate: dict) -> dict | None:
             xing_sd=candidate['entry_sd'],
             exit_sd=candidate['exit_sd'],
         )
-        return {'current_sd': sig.current_sd, 'signal_state': sig.signal_state}
+        current_sd = sig.current_sd
+        return {
+            'current_sd':   current_sd,
+            'signal_state': _candidate_state(current_sd, candidate['entry_sd']),
+        }
     except Exception:
         return None
 
@@ -50,7 +77,8 @@ def _render_candidate_card(candidate: dict) -> None:
             sd = sm['current_sd']
             sc1.metric("Current SD", f"{sd:+.2f}")
             sc1.progress((max(-3.0, min(3.0, sd)) + 3.0) / 6.0)
-            sc2.markdown(f"**{_signal_state_badge(sm['signal_state'])}**")
+            badge = _CANDIDATE_BADGES.get(sm['signal_state'], sm['signal_state'])
+            sc2.markdown(f"**{badge}**")
             sc2.caption(f"State: `{sm['signal_state']}`")
             if sm['signal_state'] in ('LONG_ENTRY', 'SHORT_ENTRY'):
                 st.warning("⚡ Entry signal active — load to Stake Calc to size and book.")
