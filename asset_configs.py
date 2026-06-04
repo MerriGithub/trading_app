@@ -2,19 +2,52 @@
 asset_configs.py — Instrument definitions and cost models per asset class
 =========================================================================
 
-Instrument dict structure (per instrument):
-    display         : str   human-readable name
-    data_source     : str   'yahoo' | 'csv' | 'broker'
-    intraday_ticker : str | None  Yahoo Finance ticker for intraday data
-    spread_pct      : float one-way bid-ask spread as fraction
-    point_size      : float P&L multiplier per point
-    sector          : str   grouping label
+This is the **authoritative source** for all instrument definitions across
+equity indices, FX pairs, commodities, and fixed income.  Multi-asset changes
+must go here, NOT in ``config.py`` (which holds algorithm parameters only).
 
-Class-level keys (unchanged for backward compat with engine/):
+Relation to config.py
+---------------------
+- ``asset_configs.py`` — instrument definitions, spread costs, CFD specs,
+  financing structures, exclusion lists, and WF-validated scoring modes.
+- ``config.py`` — algorithm parameters (vol_window, xing_sd, etc.) and
+  legacy equity mappings imported by older engine code.
+
+Per-instrument dict structure
+-----------------------------
+    display         : str   human-readable name for the UI
+    data_source     : str   'yahoo' | 'csv' — determines how DataRegistry loads prices
+    intraday_ticker : str | None   Yahoo Finance ticker for live/intraday data
+    spread_pct      : float one-way bid-ask spread as a fraction of price
+    point_size      : float P&L multiplier per point move (typically 1.0)
+    sector          : str   grouping label for search/display
+
+Per-class-level dict keys (unchanged for backward compat with engine/)
+----------------------------------------------------------------------
     label           : str
-    csv_file        : str   filename under cache/
-    financing       : dict  long_rate, short_rate, net_daily
-    point_sizes     : dict  code → float  (kept for engine backward compat)
+    csv_file        : str   filename under cache/ (e.g. 'prices.csv')
+    financing       : dict  long_rate, short_rate, net_daily (annual fractions)
+    point_sizes     : dict  code → float  (flat dict kept for engine backward compat)
+
+Exclusion lists
+---------------
+``COMMODITY_EXCLUDE``: instruments in the CSV but excluded from all pair
+generation, backtests, and walk-forward.  Reason: WTI had a catastrophic
+negative price event in April 2020 (daily return ~ −300%) that contaminates
+exhaustive search results.
+
+``FI_EXCLUDE``: fixed income instruments excluded from pair generation due
+to data quality issues.  IBTM had irregular pricing that skews signals.
+Reference-only tickers (UST10Y etc.) are also in this set.
+
+Scoring mode constants
+----------------------
+Walk-forward validated defaults (see CLAUDE.md and Obsidian Project Reference):
+    equities:       contrarian  ρ=+0.208, p~0,     EXIT_SD=2.0 scalp regime
+    commodities:    contrarian  ρ=+0.122, p=0.0009
+    equity × FX:    contrarian  ρ=+0.053, p=0.0030
+    commodities×FI: composite   ρ=+0.069, p=0.0016
+    FX, FI:         composite   ρ≈0 — no validated predictor
 """
 
 
@@ -228,20 +261,27 @@ FIXED_INCOME = {
 # FI EXCLUSION LIST
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ── Exclusion lists ───────────────────────────────────────────────────────
+
+# IBTM excluded: pricing data has irregular gaps that produce spurious signals.
+# UST*Y excluded: reference-only yield indices, not tradeable instruments.
 FI_EXCLUDE = frozenset({'UST10Y', 'UST30Y', 'UST5Y', 'IBTM'})
 
-COMMODITY_EXCLUDE = frozenset({
-    'WTI',  # April 2020 negative price event: daily return ~ −300%
-            # Pathological spread returns distort exhaustive search and walk-forward.
-            # Excluded from: Tab 8 commodity search, Tab 9 walk-forward, Tab 10 scanner.
-            # Individual WTI monitoring (Tab 1/2) is unaffected.
-})
+# WTI excluded: April 2020 negative price event produced a daily return of
+# approximately −300%, which corrupts rolling vol, z-scores, and exhaustive
+# search results for any commodity pair containing WTI.
+# Excluded from: Tab 8 commodity backtest, Tab 9 walk-forward, Tab 10 scanner.
+# Individual WTI monitoring (Tabs 1 and 2) is intentionally unaffected.
+COMMODITY_EXCLUDE = frozenset({'WTI'})
 
+# ── WF-validated scoring mode defaults (per-asset-class) ─────────────────
+# Tabs 8 and 9 auto-default to these; warn users on deviation.
+# Tabs 10 and 11 do not use a scoring mode selector — see CLAUDE.md reg. F/G.
 _DEFAULT_SCORING_MODE = {
-    'equity':       'contrarian',  # WF validated: rho=+0.208, p~0, EXIT_SD=2.0 scalp regime
-    'fx':           'composite',
-    'fixed_income': 'composite',
-    'commodities':  'contrarian',   # WF validated: ρ = +0.122, p = 0.0009
+    'equity':       'contrarian',   # WF: ρ=+0.208, p~0    — scalp regime EXIT_SD=2.0
+    'fx':           'composite',    # WF: ρ≈0 — no validated predictor
+    'fixed_income': 'composite',    # WF: ρ≈0 — no validated predictor
+    'commodities':  'contrarian',   # WF: ρ=+0.122, p=0.0009
 }
 
 # Combination-specific scoring mode defaults for cross-asset pairs.
@@ -260,7 +300,16 @@ CROSS_ASSET_SCORING_MODE: dict[tuple[str, str], str] = {
 
 
 def get_cross_asset_scoring_default(long_ac: str, short_ac: str) -> str:
-    """Return WF-validated scoring mode default for a cross-asset combination."""
+    """Return the WF-validated scoring mode for a cross-asset pair combination.
+
+    Args:
+        long_ac: Asset class key for the long leg (e.g. ``'equity'``).
+        short_ac: Asset class key for the short leg (e.g. ``'fx'``).
+
+    Returns:
+        ``'contrarian'`` or ``'composite'`` per ``CROSS_ASSET_SCORING_MODE``.
+        Defaults to ``'composite'`` for untested combinations.
+    """
     return CROSS_ASSET_SCORING_MODE.get((long_ac, short_ac), 'composite')
 
 CROSS_ASSET_COMBINATIONS = [
@@ -301,10 +350,22 @@ def get_spread_cost_lookup(
     latest_prices: dict[str, float],
     asset_key: str = 'equity',
 ) -> dict[str, float]:
-    """
-    Return per-instrument spread cost (one-way %, as fraction).
-    Reads spread_pct from nested instrument dict in ASSET_CLASSES.
-    Falls back to account.get_spread_cost_fallback() for unknowns.
+    """Return per-instrument one-way bid-ask spread cost as a fraction.
+
+    Reads ``spread_pct`` from the nested instrument dict in ASSET_CLASSES.
+    Falls back to ``account.get_spread_cost_fallback()`` for instruments
+    not found in any asset class.
+
+    Args:
+        instruments: Instrument codes to look up.
+        latest_prices: Latest ``{instrument: price}`` dict (accepted for
+            interface consistency; not used in the current implementation).
+        asset_key: Hint for the primary asset class (unused; kept for
+            backward compatibility).
+
+    Returns:
+        ``{instrument: spread_fraction}`` dict where spread_fraction is
+        the one-way cost (e.g. 0.0003 = 0.03%). Round-trip = 4× this value.
     """
     from account import get_spread_cost_fallback
     fallback = get_spread_cost_fallback()
@@ -332,11 +393,21 @@ def basket_spread_cost(
     instruments: list[str],
     spread_cost_lookup: dict[str, float],
 ) -> float:
-    """
-    Compute the round-trip basket spread cost as a fraction.
+    """Compute the round-trip basket spread cost as a fraction of notional.
 
-    Formula: 4 × mean(spread_cost_pct_i for i in all combo instruments)
-    Factor of 4 = ×2 round-trip, ×2 long + short sides.
+    Formula: ``4 × mean(spread_cost_pct_i)`` over all instruments in the basket.
+    Factor of 4 = ×2 round-trip (enter + exit) × ×2 (long leg + short leg).
+
+    Args:
+        long_combo: Index positions in ``instruments`` for the long legs.
+        short_combo: Index positions in ``instruments`` for the short legs.
+        instruments: Full instrument list (indices are into this list).
+        spread_cost_lookup: ``{instrument: one_way_spread_fraction}`` dict
+            from ``get_spread_cost_lookup()``.
+
+    Returns:
+        Round-trip spread cost as a fraction (e.g. 0.004 = 0.4%).
+        Returns 0.0 for an empty basket.
     """
     all_instr = [instruments[i] for i in long_combo] + [instruments[i] for i in short_combo]
     if not all_instr:
@@ -346,14 +417,34 @@ def basket_spread_cost(
 
 
 def get_tradeable_instruments(asset_class_key: str) -> list[str]:
-    """Return tradeable instrument codes (excludes reference-only)."""
+    """Return tradeable instrument codes for an asset class.
+
+    Excludes instruments listed in the class-level ``reference_only`` list
+    (e.g. UST10Y yield indices in fixed income).
+
+    Args:
+        asset_class_key: One of ``'equity'``, ``'fx'``, ``'commodities'``,
+            ``'fixed_income'``.
+
+    Returns:
+        List of tradeable instrument code strings.
+    """
     cfg = ASSET_CLASSES[asset_class_key]
     exclude = set(cfg.get('reference_only', []))
     return [k for k in cfg['instruments'] if k not in exclude]
 
 
 def get_display_name(asset_class_key: str, code: str) -> str:
-    """Look up display name for an instrument code."""
+    """Return the human-readable display name for an instrument code.
+
+    Args:
+        asset_class_key: Asset class to search (e.g. ``'equity'``).
+        code: Instrument code (e.g. ``'UKX'``).
+
+    Returns:
+        Display name string (e.g. ``'FTSE 100'``), or ``code`` itself if
+        not found.
+    """
     cfg = ASSET_CLASSES[asset_class_key]
     inst_cfg = cfg['instruments'].get(code)
     if inst_cfg is not None:
@@ -364,7 +455,16 @@ def get_display_name(asset_class_key: str, code: str) -> str:
 
 
 def get_data_source(code: str) -> str:
-    """Return the data source key for an instrument ('yahoo', 'csv', 'broker')."""
+    """Return the data source key for an instrument.
+
+    Args:
+        code: Instrument code.
+
+    Returns:
+        ``'yahoo'`` for instruments with live Yahoo Finance daily data,
+        ``'csv'`` for instruments loaded from the cache CSV only.
+        Defaults to ``'csv'`` if the instrument is not found.
+    """
     for cfg in ASSET_CLASSES.values():
         if code in cfg.get('instruments', {}):
             inst_cfg = cfg['instruments'][code]
@@ -374,7 +474,15 @@ def get_data_source(code: str) -> str:
 
 
 def get_intraday_ticker(code: str) -> str | None:
-    """Return the Yahoo Finance intraday ticker for an instrument, or None."""
+    """Return the Yahoo Finance intraday ticker for an instrument.
+
+    Args:
+        code: Instrument code (e.g. ``'BRENT'``).
+
+    Returns:
+        Yahoo Finance ticker string (e.g. ``'BZ=F'``), or ``None`` if the
+        instrument has no configured intraday ticker.
+    """
     for cfg in ASSET_CLASSES.values():
         if code in cfg.get('instruments', {}):
             inst_cfg = cfg['instruments'][code]
@@ -384,9 +492,14 @@ def get_intraday_ticker(code: str) -> str | None:
 
 
 def get_cfd_contract_size(code: str) -> tuple[float, str]:
-    """
-    Return (cfd_contract_size, cfd_currency) for an instrument code.
-    Falls back to (1.0, 'USD') if not found.
+    """Return CFD contract size and currency for an instrument.
+
+    Args:
+        code: Instrument code (e.g. ``'GOLD'``).
+
+    Returns:
+        ``(cfd_contract_size, cfd_currency)`` tuple. Falls back to
+        ``(1.0, 'USD')`` if the instrument is not found.
     """
     for cfg in ASSET_CLASSES.values():
         if code in cfg.get('instruments', {}):
@@ -400,7 +513,15 @@ def get_cfd_contract_size(code: str) -> tuple[float, str]:
 
 
 def get_cross_asset_label(long_class: str, short_class: str) -> str:
-    """Human-readable label for a cross-asset category pair."""
+    """Return a human-readable label for a cross-asset category pair.
+
+    Args:
+        long_class: Asset class key for the long universe.
+        short_class: Asset class key for the short universe.
+
+    Returns:
+        Label string e.g. ``'Equity vs FX'``.
+    """
     labels = {
         'equity':       'Equity',
         'fx':           'FX',

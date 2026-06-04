@@ -1,7 +1,19 @@
+"""
+Tab 6 — Live Monitor
+=====================
+Intraday price monitor showing the latest signal z-scores for all active
+instruments.  Refreshes on demand or auto-refreshes at a configurable interval.
+
+Note: This is Tab 6 (live_monitor), not the Trade Journal.
+The Trade Journal is Tab 7 (tab7_journal.py) — see register item A in CLAUDE.md.
+"""
 from __future__ import annotations
 
+import logging
 import datetime as _dt
 import time as _time
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
 import streamlit as st

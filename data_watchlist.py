@@ -46,6 +46,7 @@ def load_watchlist() -> list:
         with open(_WATCHLIST_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
+        # File corrupt or unreadable; return empty list so the UI starts clean.
         return []
 
 
@@ -113,6 +114,7 @@ def load_monitor_candidates() -> list[dict]:
         with open(_MONITOR_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
+        # File corrupt or unreadable; return empty list so monitor starts clean.
         return []
 
 
@@ -148,6 +150,7 @@ def load_wf_cache() -> dict:
         with open(_WF_CACHE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
+        # File corrupt or unreadable; return empty dict so WF tab starts clean.
         return {}
 
 

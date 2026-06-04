@@ -1,8 +1,29 @@
+"""
+Tab 11 — Single-Pair Rolling Walk-Forward
+==========================================
+Runs the rolling walk-forward validator for a single user-selected pair.
+Shows how IS performance metrics evolved over time and whether they
+predicted OOS returns.
+
+REGISTER ITEM G — Q11 (full cross-pair validation) lives in tab9.
+This tab is the single-pair diagnostic tool, not Q11.
+
+No scoring mode selector — register item F in CLAUDE.md.
+
+Session state (widget keys)
+---------------------------
+wf_pair : str
+    Selected pair string (e.g. ``'FTSE / DAX'``).
+"""
 from __future__ import annotations
+
+import logging
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+
+logger = logging.getLogger(__name__)
 import streamlit as st
 
 from engine.backtest import prepare_returns, run_backtest, aggregate_trades
@@ -139,6 +160,7 @@ def _run_wf(
         try:
             is_sc, is_di, is_idx = prepare_returns(prices.iloc[start:is_end], instr, vol_window)
         except Exception:
+            # prepare_returns can fail if the window has insufficient data; skip window.
             continue
         if is_sc.shape[0] < max(vol_window // 2, 20):
             continue
@@ -152,6 +174,7 @@ def _run_wf(
                 prices.iloc[start:oos_end], instr, vol_window, window_days=oos_days,
             )
         except Exception:
+            # OOS window construction failed; skip this window entirely.
             continue
         if oos_sc.shape[0] < max(vol_window // 4, 10):
             continue
@@ -216,6 +239,7 @@ def _wf_summary(df: pd.DataFrame) -> dict:
             r, _ = spearmanr(valid_both['_is_an'].values, valid_both['_oos_an'].values)
             consistency_score = float(r)
         except Exception:
+            # Spearman computation can fail with constant arrays; consistency_score stays None.
             pass
 
     if stable_pct >= 75:
@@ -231,6 +255,7 @@ def _wf_summary(df: pd.DataFrame) -> dict:
             try:
                 return None if (v is None or (isinstance(v, float) and np.isnan(v))) else v
             except Exception:
+                # isinstance check raises for some numpy types; return v as-is.
                 return v
         windows_data.append({
             'Window':       int(row['Window']),
@@ -442,6 +467,44 @@ def render() -> None:
                     height=350, margin=dict(l=0, r=0, t=40, b=0),
                 )
                 st.plotly_chart(_fig, use_container_width=True)
+
+            # ── Add to watchlist ─────────────────────────────────────────────────────
+            st.divider()
+            _ac_l = _get_ac(_long[0])  if len(_long)  == 1 else 'equity'
+            _ac_s = _get_ac(_short[0]) if len(_short) == 1 else 'equity'
+
+            _wf_summary_dict = _wf_summary(df)
+
+            _wl_entry_candidate = {
+                'long':              _long[0]  if len(_long)  == 1 else '+'.join(_long),
+                'short':             _short[0] if len(_short) == 1 else '+'.join(_short),
+                'asset_class_long':  _ac_l,
+                'asset_class_short': _ac_s,
+                'entry_sd':          _parms['entry_sd'],
+                'exit_sd':           _parms['exit_sd'],
+                'vol_window':        _parms['vol_window'],
+                'trend_window':      _parms['trend_window'],
+                'trend_mode':        _parms['trend_mode'],
+                'scan_metrics':      {},
+                'wf_metrics':        _wf_summary_dict,
+            }
+
+            _verdict     = _wf_summary_dict.get('recommendation', 'Unknown')
+            _avg_net     = _wf_summary_dict.get('avg_oos_net')
+            _avg_net_str = f"{_avg_net:+.3%}" if _avg_net is not None else "N/A"
+
+            if st.button(
+                f"★ Add to watchlist  ({_verdict} · Avg OOS net {_avg_net_str})",
+                key='wf11_add_watchlist',
+                type='primary',
+                use_container_width=True,
+            ):
+                from data_watchlist import add_to_watchlist, save_wf_result
+                _entry = _batch_result_to_watchlist_entry(_wl_entry_candidate)
+                _eid   = add_to_watchlist(_entry)
+                save_wf_result(_eid, _wf_summary_dict)
+                st.toast(f"★ Added to watchlist: {_entry['long']} / {_entry['short']}")
+                st.rerun()
 
     # ── Batch Walk-Forward ────────────────────────────────────────────────────
     _batch = st.session_state.get('wf_batch')

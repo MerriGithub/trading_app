@@ -163,6 +163,8 @@ def _fetch_new_rows(
 
         return df if not df.empty else None
     except Exception:
+        # Any network or parsing failure during refresh returns None;
+        # callers skip the file update on None.
         return None
 
 

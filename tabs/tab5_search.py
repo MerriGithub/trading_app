@@ -1,7 +1,17 @@
+"""
+Tab 5 — Pair Search
+====================
+Runs the exhaustive pair search over a selected asset class and returns a
+ranked table of spread opportunities scored by the selected scoring mode.
+"""
 from __future__ import annotations
+
+import logging
 
 import pandas as pd
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 from engine.backtest import load_asset_prices
 from engine.calculations import returns as _eq_returns, scaling_vectors as _eq_scalings_fn

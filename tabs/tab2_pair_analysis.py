@@ -1,4 +1,32 @@
+"""
+Tab 2 — Pair Analysis
+=====================
+Interactive spread chart and signal viewer for a user-selected instrument
+pair.  Entry points: direct selection or pre-fill from Watchlist (tab12)
+or Monitor (tab1).
+
+Session state (widget keys — written by Streamlit widgets in this tab)
+----------------------------------------------------------------------
+pa_vol : int
+    Rolling vol/crossing window in trading days. Default 262.
+pa_xing : float
+    Crossing signal entry threshold (SD). Default 2.0.
+pa_exit : float
+    Exit threshold (SD). Default 1.0.
+pa_trend_window : int
+    Trend-volatility ratio lookback window.
+pa_wl_id : str | None
+    Watchlist entry id pre-filled from tab12; cleared after use.
+
+Session state written
+---------------------
+sidebar_nav_pending : str
+    Written when user clicks "Run Walk-Forward" quick-nav button.
+    Uses the pending pattern — see register item B in CLAUDE.md.
+"""
 from __future__ import annotations
+
+import logging
 
 import numpy as np
 import pandas as pd
@@ -7,6 +35,8 @@ import streamlit as st
 
 from core.basket import Basket
 from core.position import Position
+
+logger = logging.getLogger(__name__)
 from engine.numba_core import COL_ENTRY_IDX as _CEI, COL_SIDE as _CS
 from engine.backtest import aggregate_trades as _agg_bt
 from asset_configs import ASSET_CLASSES
@@ -240,7 +270,7 @@ def render() -> None:
             'trend_mode':   _tmode,
             'source':       'tab2',
         }
-        st.session_state['sidebar_nav_pending'] = "🔀 Walk-Forward"
+        st.session_state['sidebar_nav_pending'] = "🔀 Walk-Forward"  # register item B: use pending, not sidebar_nav
         st.rerun()
 
     try:

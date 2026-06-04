@@ -109,6 +109,8 @@ def _check_signal_alerts(portfolio: Portfolio, registry: DataRegistry) -> list[d
                     'days_held': pos.days_held,
                 })
         except Exception:
+            # Signal computation can fail if price data is stale or unavailable.
+            # Skip this position's alert rather than crashing the page load.
             pass
     return alerts
 

@@ -1,7 +1,38 @@
+"""
+Tab 3 — Stake Calculator
+=========================
+Computes position sizes, capital requirements, and financing costs for a
+proposed spread trade, then optionally books it into the journal.
+
+Session state (widget keys — written by Streamlit widgets in this tab)
+----------------------------------------------------------------------
+tab3_direction : str
+    Spread direction: ``'long_spread'`` or ``'short_spread'``.
+_pricing_broker : str
+    Broker profile selector key (e.g. ``'ig_spreadbet'``).
+tab3_broker_profile : str
+    Active broker profile key; synced with ``_pricing_broker``.
+
+Session state written
+---------------------
+tab7_pending_entry : dict
+    Trade metadata dict written when user clicks "Book Trade".
+    Consumed by tab7_journal.py to pre-fill the journal confirm form.
+    Key is ``tab7_pending_entry``, not ``tab6_pending_entry``
+    (register item A — journal is tab7, not tab6).
+sidebar_nav_pending : str
+    Written after "Book Trade" to navigate user to Journal, or after
+    "Analyse Pair" to navigate to Pair Analysis.
+    Uses the pending pattern — see register item B in CLAUDE.md.
+"""
 from __future__ import annotations
+
+import logging
 
 import pandas as pd
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 from core.basket import Basket
 from account import get_margin, get_margin_rate, get_financing_daily_rate
@@ -38,6 +69,7 @@ def _get_gbpusd() -> float:
         if v:
             return float(v)
     except Exception:
+        # Registry unavailable or GBPUSD not in cache; fall back to 1.27.
         pass
     return 1.27
 
@@ -394,7 +426,7 @@ def render() -> None:
         st.session_state['pa_long_pending']  = list(_effective_long)
         st.session_state['pa_short_pending'] = list(_effective_short)
         st.session_state['pa_pair_pending']  = '— Custom pair —'
-        st.session_state['sidebar_nav_pending'] = "📈 Pair Analysis"
+        st.session_state['sidebar_nav_pending'] = "📈 Pair Analysis"  # register item B: use pending, not sidebar_nav
         st.rerun()
     if nc2.button("📒 Book Trade", key="tab3_book_trade", type="primary"):
         _dir_flag = "WT" if "WT" in _direction else "CT"

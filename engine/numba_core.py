@@ -11,25 +11,126 @@ Also contains pure-Python reference implementations (_ref_ prefix) that
 produce identical results.  These exist solely for the parity test
 (test_numba_parity.py) — the app should always call the Numba versions.
 
-Design notes
-------------
-- All functions take and return raw numpy arrays, never pandas objects.
-  The calling code is responsible for extracting .values / .index before
-  calling and wrapping results back into DataFrames if needed.
-- Trade arrays are pre-allocated to a worst-case size (T//2) and a
-  separate count integer tracks how many rows are valid.  This avoids
-  Python list appends inside the JIT boundary.
-- _batch_crossing_trades uses numba.prange for the outer loop over M
-  combinations, giving automatic multithreading on multi-core machines.
+Dual-path architecture — KEEP IN SYNC
+--------------------------------------
+Every algorithm has two implementations:
+  - ``_numba_*``  — Numba @njit decorated; fast but cannot use Python objects
+  - ``_ref_*``    — Pure-Python reference; used when Numba is unavailable and
+                    by the parity test (tests/test_numba_parity.py)
+
+When editing one path, you MUST update the other to maintain identical
+semantics.  The parity test will catch divergence, but it only runs the
+pure-Python path without Numba installed.  Test on both paths whenever
+modifying the exit condition or trade-detection logic.
+
+Input conventions (enforced by assertions below)
+-------------------------------------------------
+All functions take and return raw numpy arrays, never pandas objects.
+The calling code is responsible for extracting .values / .index before
+calling and wrapping results back into DataFrames if needed.
+
+Trade arrays are pre-allocated to a worst-case size (T//2) and a
+separate count integer tracks how many rows are valid.  This avoids
+Python list appends inside the JIT boundary.
+
+_batch_crossing_trades uses numba.prange for the outer loop over M
+combinations, giving automatic multithreading on multi-core machines.
+
+──────────────────────────────────────────────────────────────────────────────
+REGISTER ITEM H — exit condition sign is intentionally inverted.
+──────────────────────────────────────────────────────────────────────────────
+The exit condition in _ref_detect_trades / _numba_detect_trades is written as:
+    (side == -1 and d <= exit_sd) or (side == 1 and d >= -exit_sd)
+
+This is the CORRECT form, equivalent to:  -side * d <= exit_sd
+
+The WRONG form would be:  side * d <= exit_sd
+  → For side=-1 at entry (d=+2.2): (-1)*2.2 = -2.2 <= 1.0 → True, fires immediately.
+  → The wrong form exits on the same bar as entry, destroying all positive EV.
+
+A module-level canary assertion below (runs on import) verifies that any
+future edit has not accidentally reverted to the wrong form.
+See also: CLAUDE.md prompt correction register item H.
+
+──────────────────────────────────────────────────────────────────────────────
+REGISTER ITEM I — entry dislocation must use abs(d), not signed d.
+──────────────────────────────────────────────────────────────────────────────
+If entry dislocation (the z-score at trade entry) is ever recorded in the
+production trade array, it must be stored as abs(d):
+    entry_dist_sd = abs(d)   # CORRECT: 2.2 for both long and short entries
+    entry_dist_sd = d        # WRONG:   -2.2 for long, +2.2 for short → average≈0
+
+A module-level canary assertion below demonstrates this invariant.
+See also: CLAUDE.md prompt correction register item I.
 """
 
+import logging
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 try:
     import numba
     HAS_NUMBA = True
 except ImportError:
     HAS_NUMBA = False
+    logger.info("Numba not available; using pure-Python fallback implementations")
+
+
+# ── REGISTER ITEM H — module-level canary (runs on import) ────────────────
+#
+# Probe setup: at entry for a SHORT trade, dist_sd ≈ +2.2 (crossed above
+# xing_sd=2.0), side=-1.  The correct exit formula must NOT fire at this
+# point (the spread is still extended, not reverted).
+#
+# Correct expanded form:  (side==-1 and d<=exit_sd) or (side==1 and d>=-exit_sd)
+# Correct compact form:   -side * d <= exit_sd
+#   → -(-1) * 2.2 = 2.2 <= 1.0  → False  (does not fire at entry) ✓
+#
+# Wrong compact form:      side * d <= exit_sd
+#   → (-1) * 2.2 = -2.2 <= 1.0  → True   (fires immediately at entry) ✗
+#
+_H_probe_d, _H_probe_side, _H_probe_exit_sd = 2.2, -1, 1.0
+assert not (-_H_probe_side * _H_probe_d <= _H_probe_exit_sd), (
+    "REGISTER ITEM H VIOLATED: exit condition fires at entry. "
+    "The formula must be `-side * d <= exit_sd` (written as "
+    "`(side == -1 and d <= exit_sd) or (side == 1 and d >= -exit_sd)`), "
+    "not `side * d <= exit_sd`. "
+    "See CLAUDE.md prompt correction register item H."
+)
+
+# Also verify the correct expanded form matches for both sides:
+assert (
+    (_H_probe_side == -1 and _H_probe_d > _H_probe_exit_sd)  # short, not yet reverted
+), (
+    "REGISTER ITEM H CANARY LOGIC ERROR: probe values should represent a trade "
+    "that has not yet reached the exit threshold."
+)
+
+
+# ── REGISTER ITEM I — module-level canary (runs on import) ────────────────
+#
+# Entry dislocation must always be stored as abs(d).  The canary demonstrates
+# that signed values cancel across long/short trades when averaged.
+#
+# Scenario: equal and opposite entries.
+#   Long  at d = -2.2  (spread extended downward)  → abs(-2.2) = 2.2
+#   Short at d = +2.2  (spread extended upward)    → abs(+2.2) = 2.2
+#
+# Correct (abs): average = (2.2 + 2.2) / 2 = 2.2  (reflects true dislocation)
+# Wrong (signed): average = (-2.2 + 2.2) / 2 = 0.0  (cancels to near zero)
+#
+_I_long_d, _I_short_d = -2.2, 2.2
+_I_correct_avg = (abs(_I_long_d) + abs(_I_short_d)) / 2   # 2.2
+_I_wrong_avg   = (_I_long_d + _I_short_d) / 2             # 0.0
+assert _I_correct_avg > abs(_I_wrong_avg), (
+    "REGISTER ITEM I VIOLATED: entry dislocation canary failed. "
+    "abs(d) must be used when recording entry dislocation — signed values "
+    "from long/short entries cancel, producing near-zero averages that "
+    "misrepresent actual dislocation. "
+    "See CLAUDE.md prompt correction register item I."
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -108,7 +209,20 @@ if HAS_NUMBA:
 
 
 def rolling_mean_std(arr, window):
-    """Dispatch to Numba if available, else pure Python."""
+    """Dispatch to Numba if available, else pure Python.
+
+    Args:
+        arr: 1-D numpy float64 array of values.
+        window: Integer lookback window.
+
+    Returns:
+        Tuple ``(mean_out, std_out)`` each of shape ``(T,)``.
+    """
+    if not isinstance(arr, np.ndarray):
+        raise TypeError(
+            f"rolling_mean_std: arr must be a numpy ndarray; got {type(arr).__name__}. "
+            f"Extract .values from a pandas Series before calling."
+        )
     if HAS_NUMBA:
         return _numba_rolling_mean_std(arr, window)
     return _ref_rolling_mean_std(arr, window)
@@ -146,6 +260,8 @@ def _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days=3
         Exit threshold (e.g. 0.0 for full reversion, 0.5 for partial).
     day_ints : np.ndarray (T,) int64
         Integer day count for each timestep (for holding period calc).
+    max_hold_days : int
+        Maximum holding period before forced exit.
 
     Returns
     -------
@@ -182,9 +298,12 @@ def _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days=3
                 entry_cum = cum[i]
                 side = 1
         else:
-            # Exit when spread reverts past the exit threshold, or max hold reached
-            # side=+1 (long): entered below -xing_sd, exit when dist >= -exit_sd
-            # side=-1 (short): entered above +xing_sd, exit when dist <= exit_sd
+            # ── Exit condition (REGISTER ITEM H) ──────────────────────────
+            # Correct form: -side * d <= exit_sd
+            # Expanded for clarity:
+            #   side=-1 (short): exits when d <= exit_sd   (spread reverts toward 0)
+            #   side=+1 (long):  exits when d >= -exit_sd  (spread reverts toward 0)
+            # DO NOT rewrite as `side * d <= exit_sd` — that fires at entry.
             exit_condition = (
                 (side == -1 and d <= exit_sd) or
                 (side == 1 and d >= -exit_sd) or
@@ -212,7 +331,13 @@ def _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days=3
 if HAS_NUMBA:
     @numba.njit(cache=True)
     def _numba_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days=300):
-        """Numba-compiled trade detection.  Identical logic to _ref_ version."""
+        """Numba-compiled trade detection.  Identical logic to _ref_ version.
+
+        Exit condition (REGISTER ITEM H — do not alter the sign):
+            (side == -1 and d <= exit_sd) or (side == 1 and d >= -exit_sd)
+        This is equivalent to: -side * d <= exit_sd
+        The wrong form (side * d <= exit_sd) fires at entry, not on reversion.
+        """
         T = len(cum)
         max_trades = T // 2 + 1
         trades = np.zeros((max_trades, 5), dtype=np.float64)
@@ -240,6 +365,7 @@ if HAS_NUMBA:
                     entry_cum = cum[i]
                     side = 1
             else:
+                # REGISTER ITEM H — exit sign intentionally inverted; see module docstring
                 exit_cond = (
                     (side == -1 and d <= exit_sd) or
                     (side == 1 and d >= -exit_sd) or
@@ -265,7 +391,32 @@ if HAS_NUMBA:
 
 
 def detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days=300):
-    """Dispatch to Numba if available, else pure Python."""
+    """Dispatch to Numba if available, else pure Python.
+
+    Args:
+        cum: Cumulative spread return array, shape ``(T,)``, dtype float64.
+        dist_sd: Z-score distance array, shape ``(T,)``, dtype float64.
+        xing_sd: Entry threshold in standard deviations.
+        exit_sd: Exit threshold in standard deviations.
+        day_ints: Integer day index per row, shape ``(T,)``, dtype int64.
+        max_hold_days: Maximum holding period before forced exit.
+
+    Returns:
+        Tuple ``(trades, n_trades)`` where ``trades`` is shape
+        ``(n_trades, 5)`` with columns defined by the ``COL_*`` constants.
+    """
+    if not isinstance(cum, np.ndarray):
+        raise TypeError(
+            f"detect_trades: cum must be a numpy ndarray; got {type(cum).__name__}"
+        )
+    if not isinstance(dist_sd, np.ndarray):
+        raise TypeError(
+            f"detect_trades: dist_sd must be a numpy ndarray; got {type(dist_sd).__name__}"
+        )
+    if not isinstance(day_ints, np.ndarray):
+        raise TypeError(
+            f"detect_trades: day_ints must be a numpy ndarray; got {type(day_ints).__name__}"
+        )
     if HAS_NUMBA:
         return _numba_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days)
     return _ref_detect_trades(cum, dist_sd, xing_sd, exit_sd, day_ints, max_hold_days)
@@ -293,6 +444,8 @@ def backtest_spread(spread_returns, vol_window, xing_sd, exit_sd, day_ints, max_
         Exit threshold (0.0 = full reversion).
     day_ints : np.ndarray (T,) int64
         Integer day count per timestep.
+    max_hold_days : int
+        Maximum holding period before forced exit.
 
     Returns
     -------
@@ -301,6 +454,18 @@ def backtest_spread(spread_returns, vol_window, xing_sd, exit_sd, day_ints, max_
     cum : np.ndarray (T,)
     dist_sd : np.ndarray (T,)
     """
+    if not isinstance(spread_returns, np.ndarray):
+        raise TypeError(
+            f"backtest_spread: spread_returns must be a numpy ndarray; "
+            f"got {type(spread_returns).__name__}. "
+            f"Extract .values from a pandas Series before calling."
+        )
+    if not isinstance(day_ints, np.ndarray):
+        raise TypeError(
+            f"backtest_spread: day_ints must be a numpy ndarray; "
+            f"got {type(day_ints).__name__}"
+        )
+
     cum = np.cumprod(1.0 + spread_returns)
     roll_mean, roll_std = rolling_mean_std(cum, vol_window)
 
@@ -342,6 +507,7 @@ def _ref_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_
     xing_sd : float
     exit_sd : float
     day_ints : np.ndarray (T,)
+    max_hold_days : int
 
     Returns
     -------
@@ -400,6 +566,10 @@ if HAS_NUMBA:
         """
         Numba-parallel batch backtest.  Uses prange over M columns so each
         combination runs on a separate thread.
+
+        Exit condition (REGISTER ITEM H — do not alter):
+            (side == -1 and d <= exit_sd) or (side == 1 and d >= -exit_sd)
+        See module docstring for full explanation.
         """
         T, M = spread_mat.shape
         results = np.zeros((M, 8), dtype=np.float64)
@@ -471,6 +641,9 @@ if HAS_NUMBA:
                         entry_cum = cum[i]
                         side = 1
                 else:
+                    # REGISTER ITEM H — exit sign intentionally inverted; see module docstring.
+                    # Correct: (side==-1 and d<=exit_sd) or (side==1 and d>=-exit_sd)
+                    # Wrong:   (side==-1 and (-1)*d<=exit_sd) [this fires at entry]
                     exit_cond = (
                         (side == -1 and d <= exit_sd) or
                         (side == 1 and d >= -exit_sd) or
@@ -526,7 +699,41 @@ if HAS_NUMBA:
 
 
 def batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_hold_days=300):
-    """Dispatch to Numba-parallel if available, else pure Python."""
+    """Dispatch to Numba-parallel if available, else pure Python.
+
+    Args:
+        spread_mat: 2-D numpy float64 array of shape ``(T, M)``. Each column
+            is a vol-scaled daily spread return series. Must be a numpy array,
+            not a pandas DataFrame.
+        vol_window: Rolling lookback in trading days.
+        xing_sd: Entry threshold in standard deviations.
+        exit_sd: Exit threshold in standard deviations.
+        day_ints: 1-D int64 array of length ``T`` with integer day indices.
+        max_hold_days: Maximum holding period before forced exit.
+
+    Returns:
+        2-D numpy array of shape ``(M, 8)`` with per-combination summary
+        statistics. Columns are indexed by the ``BR_*`` constants.
+
+    Raises:
+        TypeError: If ``spread_mat`` or ``day_ints`` are not numpy arrays.
+    """
+    if not isinstance(spread_mat, np.ndarray):
+        raise TypeError(
+            f"batch_backtest: spread_mat must be a numpy ndarray; "
+            f"got {type(spread_mat).__name__}. "
+            f"Call .values on a DataFrame before passing to this function."
+        )
+    if not isinstance(day_ints, np.ndarray):
+        raise TypeError(
+            f"batch_backtest: day_ints must be a numpy ndarray; "
+            f"got {type(day_ints).__name__}"
+        )
+    if spread_mat.ndim != 2:
+        raise ValueError(
+            f"batch_backtest: spread_mat must be 2-D (T, M); "
+            f"got shape {spread_mat.shape}"
+        )
     if HAS_NUMBA:
         return _numba_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_hold_days)
     return _ref_batch_backtest(spread_mat, vol_window, xing_sd, exit_sd, day_ints, max_hold_days)

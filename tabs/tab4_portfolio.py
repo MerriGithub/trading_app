@@ -1,7 +1,17 @@
+"""
+Tab 4 — Portfolio Dashboard
+=============================
+Displays the full position summary (open + closed) with live P&L, financing
+costs, and net returns.  Also shows cross-pair correlation and capital-at-risk.
+"""
 from __future__ import annotations
+
+import logging
 
 import pandas as pd
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 from tabs.shared import (
     portfolio, registry, _cached_latest_prices, _asset_class_of,
@@ -19,6 +29,8 @@ def render() -> None:
     try:
         current_prices = _cached_latest_prices(tuple(all_open_instruments))
     except Exception:
+        # Price fetch failed (network error or empty cache); use empty dict so
+        # P&L columns show 0 rather than crashing the whole portfolio tab.
         current_prices = {}
 
     unrealised = portfolio.total_unrealised_pnl(current_prices)
@@ -44,6 +56,7 @@ def render() -> None:
             try:
                 return 'color: #1c8a4f' if float(v) >= 0 else 'color: #c0392b'
             except Exception:
+                # Non-numeric cell (e.g. NaN or string); return no style.
                 return ''
 
         def _days_colour(v):
@@ -54,6 +67,7 @@ def render() -> None:
                 if v > 90:
                     return 'background-color: #fff5d6'
             except Exception:
+                # Non-numeric cell; return no style.
                 pass
             return ''
 

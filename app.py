@@ -6,6 +6,9 @@ from __future__ import annotations
 
 import streamlit as st
 
+from logging_config import configure_logging
+configure_logging()  # Sets up stderr logging at INFO level; no-op on reruns.
+
 try:
     import data_refresh as _dr
     _HAS_DR = True
@@ -50,6 +53,8 @@ if _HAS_DR and 'data_refresh_checked' not in st.session_state:
                 st.cache_data.clear()
                 st.session_state['data_refresh_banner'] = _refreshed
     except Exception:
+        # Broad catch: data_refresh is a background convenience; any failure
+        # (network error, missing file, import error) must not crash app startup.
         pass
 
 # ── Alert pre-computation (once per page load) ────────────────────────────────
@@ -93,6 +98,7 @@ with st.sidebar:
         st.caption(f"Capital: £{_acct.get('starting_capital', 0):,.0f}")
         st.caption(f"Open positions: {_open_n}")
     except Exception:
+        # Sidebar summary is decorative; any load error must not block the UI.
         pass
 
     if _HAS_DR:
@@ -114,6 +120,7 @@ with st.sidebar:
                 else:
                     st.caption(f"🟢 {_lbl}: {_last}")
         except Exception:
+            # Staleness display is sidebar decoration; failure must not block the UI.
             pass
         if st.button("🔄 Refresh data", key="sidebar_refresh_btn"):
             with st.spinner("Refreshing…"):

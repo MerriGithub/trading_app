@@ -1,10 +1,33 @@
+"""
+Tab 8 — Backtest
+=================
+Exhaustive crossing-signal backtest across all instrument pairs for a
+selected asset class (intra-asset) or cross-asset combination.
+
+Scoring mode
+------------
+Tab 8 auto-defaults to the WF-validated scoring mode for the selected
+asset class and warns on deviation.  Scoring mode is a Tab 8 concern —
+Tab 10 sorts by AvgNet_WT directly; Tab 11 has no scoring mode selector
+(register item F in CLAUDE.md).
+
+Session state (widget keys)
+---------------------------
+bt_scoring_mode : str
+    Selected scoring mode for intra-asset backtest.
+bt_ca_scoring : str
+    Selected scoring mode for cross-asset backtest.
+"""
 from __future__ import annotations
 
 import io
+import logging
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 from engine.backtest import (
     load_asset_prices, prepare_returns, run_backtest, aggregate_trades,

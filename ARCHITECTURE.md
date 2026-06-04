@@ -7,6 +7,9 @@ _Sprint 1 complete. Signatures reflect actual implementation._
 > rules, and research optimums, see `CLAUDE.md`.
 
 ---
+## Python Path with project dependencies
+cd "c:\Users\gordo\Documents\trading_app" 
+C:\Users\gordo\AppData\Local\Python\bin\python.exe"
 
 ## Domain Layer
 

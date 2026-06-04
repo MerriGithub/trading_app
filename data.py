@@ -103,6 +103,8 @@ def load_intraday_prices(interval: str = '5m') -> pd.DataFrame | None:
         df = df[cols].dropna(how='all')
         return df
     except Exception:
+        # Any failure (network, parsing, empty data) returns None;
+        # callers check for None before using the result.
         return None
 
 

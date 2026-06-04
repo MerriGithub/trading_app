@@ -1,8 +1,35 @@
+"""
+Tab 12 — Watchlist
+===================
+Manage saved spread pairs for monitoring.  Supports creating, editing,
+and deleting watchlist entries, and pre-filling Pair Analysis or Stake
+Calculator from a saved entry.
+
+Session state (widget keys)
+---------------------------
+tab12_selected_id : str | None
+    Currently selected watchlist entry id.
+tab12_selected_entry : dict | None
+    Full entry dict for the selected id.
+tab12_dedup : bool
+    When True, deduplicate pairs that appear in multiple watchlists.
+
+Session state written
+---------------------
+sidebar_nav_pending : str
+    Written when user clicks "Analyse Pair", "Open Stake Calc", or
+    "Run Walk-Forward" quick-nav buttons.
+    Uses the pending pattern — see register item B in CLAUDE.md.
+"""
 from __future__ import annotations
+
+import logging
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 from data_watchlist import (
     load_watchlist, load_wf_cache,
@@ -56,6 +83,7 @@ def _compute_wf_summary(df: pd.DataFrame) -> dict:
             r, _ = spearmanr(valid_both['_is_an'].values, valid_both['_oos_an'].values)
             consistency_score = float(r)
         except Exception:
+            # Spearman computation can fail with constant arrays; consistency_score stays None.
             pass
 
     if stable_pct >= 75:
@@ -71,6 +99,7 @@ def _compute_wf_summary(df: pd.DataFrame) -> dict:
             try:
                 return None if (v is None or (isinstance(v, float) and np.isnan(v))) else v
             except Exception:
+                # isinstance check raises for some numpy types; return v as-is.
                 return v
         windows_data.append({
             'Window':      int(row['Window']),

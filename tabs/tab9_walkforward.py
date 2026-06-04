@@ -1,8 +1,35 @@
+"""
+Tab 9 — Trade Validation (Q11 Walk-Forward)
+============================================
+Runs the Q11 walk-forward protocol: does in-sample scoring predict
+out-of-sample performance across rolling IS/OOS windows?
+
+REGISTER ITEM G — Q11 lives here (tab9), NOT in tab11.
+Tab 11 is the single-pair rolling WF validator.
+
+Scoring mode
+------------
+Tab 9 auto-defaults to the WF-validated scoring mode and warns on
+deviation.  Both intra-asset and cross-asset runs are supported.
+
+Session state (widget keys)
+---------------------------
+wf_scoring : str
+    Scoring mode for intra-asset walk-forward.
+wf_ca_long : str
+    Long-side asset class for cross-asset walk-forward.
+wf_ca_short : str
+    Short-side asset class for cross-asset walk-forward.
+"""
 from __future__ import annotations
+
+import logging
 
 import streamlit as st
 
 from engine.walkforward import run_walk_forward, run_cross_asset_walkforward, summarise_walk_forward
+
+logger = logging.getLogger(__name__)
 from engine.backtest import load_asset_prices as _wf_load_asset_prices
 from engine.scoring import SCORING_MODES as _WF_SCORING_MODES
 from asset_configs import (

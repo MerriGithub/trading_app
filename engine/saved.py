@@ -15,6 +15,7 @@ def load_saved() -> list[dict]:
     try:
         return json.loads(SAVED_PATH.read_text())
     except Exception:
+        # File corrupt, missing, or wrong format; return empty list.
         return []
 
 

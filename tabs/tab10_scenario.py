@@ -1,8 +1,33 @@
+"""
+Tab 10 — Scenario Scanner
+==========================
+Scans all instrument pairs for trading opportunities using a regime-aware
+signal filter.  Results are sorted by AvgNet_WT (weighted average net return).
+
+No scoring mode selector — Tab 10 sorts by AvgNet_WT directly (register
+item F in CLAUDE.md).
+
+Session state (widget keys)
+---------------------------
+tab10_min_wt_trades : int
+    Minimum weighted-average trade count filter.
+tab10_broker_profile : str
+    Broker profile for financing cost estimates.
+
+Session state written
+---------------------
+sidebar_nav_pending : str
+    Written when user clicks "Run Walk-Forward" or "Analyse Pair" quick-nav
+    buttons.  Uses the pending pattern — see register item B in CLAUDE.md.
+"""
 from __future__ import annotations
 
+import logging
 from itertools import combinations, permutations
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 import pandas as pd
 import streamlit as st
 
@@ -363,6 +388,8 @@ def _run_scan(
                         'Aligned%':      _al_pct,
                     })
                 except Exception:
+                    # Single pair computation failed (stale data, vol=0, etc.);
+                    # skip this pair and continue the scan.
                     continue
 
             _sc_done += 1

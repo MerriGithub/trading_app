@@ -1,11 +1,35 @@
+"""
+Tab 7 — Trade Journal
+=====================
+Review, confirm, and manage live spread positions (open, partial-close,
+close).  Also renders the closed-trades history.
+
+REGISTER ITEM A — this is tab7, not tab6.
+The session state key is ``tab7_pending_entry`` (not ``tab6_pending_entry``).
+The file is ``tab7_journal.py`` (not ``tab6_journal.py``).
+
+Session state read
+------------------
+tab7_pending_entry : dict | None
+    Trade metadata dict written by tab3_stake_calc.py "Book Trade" action.
+    Consumed here to pre-fill the confirm form; cleared after confirmation.
+
+Session state written
+---------------------
+tab7_pending_entry : None
+    Cleared after the trade is confirmed or cancelled.
+"""
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 import pandas as pd
 import streamlit as st
 
 from core.basket import Basket
+
+logger = logging.getLogger(__name__)
 from tabs.shared import (
     portfolio, registry, _cached_latest_prices, ALL_INSTRUMENTS, ALL_DISPLAY, _asset_class_of,
 )
@@ -222,6 +246,7 @@ def render() -> None:
             try:
                 buy_default = float(_cached_latest_prices((buy_inst,)).get(buy_inst, 0.0))
             except Exception:
+                # Price unavailable (cache miss or network error); default to 0.
                 buy_default = 0.0
             buy_price = lcols[1].number_input(
                 "Buy price", value=buy_default, format="%.4f", key=f"leg_bp_{i}",
@@ -238,6 +263,7 @@ def render() -> None:
             try:
                 sell_default = float(_cached_latest_prices((sell_inst,)).get(sell_inst, 0.0))
             except Exception:
+                # Price unavailable (cache miss or network error); default to 0.
                 sell_default = 0.0
             sell_price = lcols[4].number_input(
                 "Sell price", value=sell_default, format="%.4f", key=f"leg_sp_{i}",

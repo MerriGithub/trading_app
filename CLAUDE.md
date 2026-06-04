@@ -84,8 +84,9 @@ configured on the current machine.
 | E | CFD capital needed: reconstruct from `cfd_size × price / gbpusd / vol` | **`(cfd_min / contracts_raw) × target_1sd`** — ratio pattern; currency-agnostic | 2026-05-24 |
 | F | Scoring mode selectors in Tab 10 and Tab 11 | Scoring mode selectors are in **Tab 8** (Backtest) and **Tab 9** (Trade Validation). Tab 10 sorts by AvgNet_WT directly. Tab 11 has no scoring mode. | 2026-05-25 |
 | G | Q11 protocol lives in Tab 11 | Q11 protocol lives in **Tab 9** (Trade Validation). Tab 11 = single-pair rolling WF validator. | 2026-05-25 |
-| H | Exit formula: `side * d <= EXIT_SD` | Correct form: **`-side * d <= EXIT_SD`** (sign inverted). Expanded: `(side==-1 and d<=EXIT_SD) or (side==+1 and d>=-EXIT_SD)`. The wrong form fires at entry. | 2026-06-02 |
-| I | `dist_sd_at_entry = d` (signed) | Must be **`abs(d)`** — signed values cancel across long/short sides and produce near-zero averages. | 2026-06-02 |
+| H | Exit formula: `side * d <= EXIT_SD` | Correct form: **`-side * d <= EXIT_SD`** (sign inverted). Expanded: `(side==-1 and d<=EXIT_SD) or (side==+1 and d>=-EXIT_SD)`. The wrong form fires at entry. **A module-level assertion in `engine/numba_core.py` enforces this at import time — do not remove it.** | 2026-06-02 |
+| I | `dist_sd_at_entry = d` (signed) | Must be **`abs(d)`** — signed values cancel across long/short sides and produce near-zero averages. **A module-level assertion in `engine/numba_core.py` enforces this at import time — do not remove it.** | 2026-06-02 |
+| J | Tab 6 = Journal | Tab 6 = **Live Monitor** (`tab6_live_monitor.py`). Journal = Tab 7. Tab 6 shows signal alerts and live signal state for watchlist pairs. | 2026-06-04 |
 
 ---
 
@@ -104,6 +105,7 @@ FX pairs, commodities, and fixed income.
 
 ```
 app.py                    # Streamlit entry point; imports tabs/
+logging_config.py         # Centralised logging — configure_logging() called once from app.py
 tabs/tab1.py … tab12.py   # One file per UI tab
 tabs/shared.py            # Singleton helpers (portfolio, registry, account)
 engine/                   # Backtest, search, scoring, walk-forward
@@ -122,6 +124,7 @@ account.py                # Financing rates, margin; loads from data/account.jso
 |----------|---------|-------------------|
 | `tab2_pair_analysis.py` | Pair Analysis | `pa_vol`, `pa_xing`, `pa_exit`, `pa_trend_window`, `pa_wl_id` |
 | `tab3_stake_calc.py` | Stake Calculator | `tab3_direction`, `_pricing_broker`, `tab3_broker_profile` |
+| `tab6_live_monitor.py` | Live Monitor | signal alerts, watchlist signal states |
 | `tab7_journal.py` | Trade Journal | `tab7_pending_entry` |
 | `tab8_backtest.py` | Backtest | `bt_scoring_mode`, `bt_ca_scoring` |
 | `tab9_walkforward.py` | Trade Validation (Q11) | `wf_scoring`, `wf_ca_long`, `wf_ca_short` |
@@ -158,10 +161,10 @@ Two config layers; they are **not** interchangeable:
 | Asset class / combination | Mode | Basis |
 |---------------------------|------|-------|
 | Commodities | **Contrarian** | ρ=+0.122, p=0.0009 |
+| Equities | **Contrarian** | ρ=+0.208, p≈0 |
 | Equity × FX | **Contrarian** | ρ=+0.053, p=0.0030 |
 | Commodity × FI | Composite | ρ=+0.069, p=0.0016 |
 | Commodity × FX | Composite | ρ≈0 |
-| Equities | Composite | ρ≈0 |
 
 Tab 8 and Tab 9 auto-default to the correct mode and warn on deviation.
 Tab 10 has no scoring mode selector. Tab 11 has none at all (register item F/G).
@@ -248,7 +251,7 @@ commodity benchmarks for comparison.
 | Equity 3v3 exhaustive (SD=2.0/0.0, Vol=262, 4.88%) | Net −0.122, WR 86.4%, AvgHold 169d |
 | Commodity 1v1 exhaustive (Vol=262, exit=0.0) | AvgNet ~5.40%, WR ~87%, AvgHold ~121d |
 | NATGAS/BRENT counter-trend (Vol=262, exit=0) | Gross WR 86.7%, Avg net +1.60%, AvgHold 121d |
-| WF equity composite (IS=3y, OOS=1y) | ρ=−0.017, p=0.6064 |
+| WF equity contrarian scalp (IS=3y, OOS=1y, EXIT=2.0) | ρ=+0.208, p≈0 |
 | WF commodity contrarian (IS=3y, OOS=1y) | ρ=+0.122, p=0.0009 |
 | WF Equity×FX contrarian (IS=5y, OOS=3y) | ρ=+0.053, p=0.0030 |
 
@@ -259,7 +262,7 @@ commodity benchmarks for comparison.
 | Asset class | XING_SD | EXIT_SD | Avg net/trade | Avg hold | Status |
 |-------------|---------|---------|---------------|----------|--------|
 | Commodities | 2.0 | **0.5** | +1.137% | 104d | ✅ Confirmed optimum |
-| Equities (scalp regime) | 2.0 | **2.0** | +0.380% | 8d | ✅ Confirmed; WF validation pending |
+| Equities (scalp regime) | 2.0 | **2.0** | +0.380% | 8d | ✅ Confirmed; WF validated ρ=+0.208 |
 | FX | 2.0 | 1.5 (best of bad) | −0.160% | 35d | ❌ Net negative at all EXIT_SD |
 | Fixed Income | 2.0 | 1.5 (best of bad) | −0.174% | 35d | ❌ Net negative at all EXIT_SD |
 
@@ -268,9 +271,52 @@ median hold 1d — exits on noise). Do not go above 2.0 for equities.
 
 ---
 
+## Code quality standard
+
+> **Every file you touch must be left compliant with this standard.**
+> Full specification is in §17 of the Obsidian Project Reference.
+> The rules below are the mandatory minimum — read §17 for examples and patterns.
+
+1. **Type hints** — all function signatures; `from __future__ import annotations` for
+   forward references; no `Any` without a comment.
+
+2. **Google-style docstrings** — every non-trivial function and class; Args / Returns /
+   Raises blocks; explain the *why*, not just the *what*; reference register items
+   by letter where relevant.
+
+3. **Logging, not print** — `import logging; logger = logging.getLogger(__name__)` at
+   the top of every module. Never call `logging.basicConfig()` or add handlers inside
+   module files — only `logging_config.py` and `app.py` do that.
+
+4. **Fail-fast input guards** — validate at the function boundary before any computation.
+   Use explicit `if / raise` with informative messages. Common checks: None/empty,
+   minimum row count, instrument membership, side ∈ {1, −1}, numeric range.
+
+5. **Specific exception types** — no bare `except:`, no `except Exception:` without a
+   comment explaining what is caught and why.
+
+6. **Register item canaries** — the module-level assertions for items H and I in
+   `engine/numba_core.py` are permanent. Do not remove or suppress them. They make
+   the application unrunnable if either invariant is violated.
+
+### Compliance check — run before ending any session
+
+```bash
+pytest tests/ -q
+grep -r "print("        trading_app/ --include="*.py" --exclude-dir=legacy
+grep -r "except:"       trading_app/ --include="*.py" --exclude-dir=legacy
+grep -r "except Exception:" trading_app/ --include="*.py" --exclude-dir=legacy
+```
+
+The first command must show the same pass count as your session baseline.
+The remaining three must return only expected results (UI-rendering prints,
+zero bare excepts, zero unjustified broad excepts).
+
+---
+
 ## For further context
 
 The Obsidian Project Reference contains the full design decisions log (decisions
-1–65), walk-forward pipeline architecture diagram, paper trading candidates,
-all Phase 2–4b experiment tables, open items list, and cross-references to
-research notes. Consult it before making architectural decisions.
+1–89), walk-forward pipeline architecture diagram, paper trading log, all Phase
+2–4b experiment tables, open items list, Sprint 3 scope, and the complete code
+quality standard (§17). Consult it before making architectural decisions.

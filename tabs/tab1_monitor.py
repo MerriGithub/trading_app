@@ -1,8 +1,31 @@
+"""
+Tab 1 — Monitor
+================
+Live signal monitor for open positions and watchlist candidates.
+Displays current z-score, signal state, and quick-navigation buttons.
+
+Session state written
+---------------------
+sidebar_nav_pending : str
+    Navigation target written when user clicks "Open Stake Calc" or
+    "Go to Pair Analysis". Uses the pending pattern (register item B) —
+    direct write to ``sidebar_nav`` crashes on Streamlit rerun.
+
+Session state read
+------------------
+signal_alerts : list[dict]
+    Pre-computed signal alerts from tabs/shared.py ``_check_signal_alerts()``.
+    Set once per page load in app.py.
+"""
 from __future__ import annotations
+
+import logging
 
 import streamlit as st
 
 from core.basket import Basket
+
+logger = logging.getLogger(__name__)
 from core.signal import SpreadSignal
 from data_watchlist import load_monitor_candidates, remove_monitor_candidate
 from tabs.shared import (
@@ -52,6 +75,8 @@ def _candidate_signal(candidate: dict) -> dict | None:
             'signal_state': _candidate_state(current_sd, candidate['entry_sd']),
         }
     except Exception:
+        # Signal construction fails if price data is unavailable for this pair.
+        # Return None so the caller can skip the card rather than crashing.
         return None
 
 
@@ -90,7 +115,7 @@ def _render_candidate_card(candidate: dict) -> None:
             st.session_state['tab3_direction']          = candidate['direction']
             st.session_state['tab3_vol_window_pending'] = candidate['vol_window']
             st.session_state['tab3_from_monitor']       = candidate['id']
-            st.session_state['sidebar_nav_pending']     = "🧮 Stake Calc"
+            st.session_state['sidebar_nav_pending']     = "🧮 Stake Calc"  # register item B: use pending, not sidebar_nav
             st.rerun()
         if bc2.button("✖ Remove", key=f"mon_remove_{candidate['id']}"):
             remove_monitor_candidate(candidate['id'])
