@@ -7,7 +7,7 @@ import streamlit as st
 
 from engine.backtest import prepare_returns, run_backtest, aggregate_trades
 from engine.numba_core import COL_ENTRY_IDX, COL_SIDE
-from asset_configs import ASSET_CLASSES, _DEFAULT_SCORING_MODE
+from asset_configs import ASSET_CLASSES, _DEFAULT_SCORING_MODE, get_display_name
 from tabs.shared import registry, _tbl, ALL_INSTRUMENTS, ALL_DISPLAY
 
 
@@ -577,7 +577,10 @@ def render() -> None:
         _m   = _r['wf_metrics']
         _err = _m.get('error', '')
         _tbl_rows.append({
-            'Pair':        f"{_r['long']} / {_r['short']}",
+            'Pair': (
+                f"{get_display_name(_r.get('asset_class_long', 'equity'), _r['long'])} / "
+                f"{get_display_name(_r.get('asset_class_short', 'equity'), _r['short'])}"
+            ),
             'Entry SD':    _r['entry_sd'],
             'Exit SD':     _r['exit_sd'],
             'Vol':         _r['vol_window'],

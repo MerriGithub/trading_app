@@ -2,6 +2,12 @@
 
 _Sprint 1 complete. Signatures reflect actual implementation._
 
+> This file is the authoritative reference for method signatures, parameters,
+> and return types. For project scope, commands, tab map, config split, scoring
+> rules, and research optimums, see `CLAUDE.md`.
+
+---
+
 ## Domain Layer
 
 ### Basket (core/basket.py)
@@ -13,7 +19,7 @@ _Sprint 1 complete. Signatures reflect actual implementation._
 ### SpreadSignal (core/signal.py)
 - `__init__(basket, prices, vol_window=262, xing_sd=2.0, exit_sd=1.0)`
 - `current_sd -> float` — latest distance_sd value
-- `signal_state -> str` — 'LONG_ENTRY' | 'SHORT_ENTRY' | 'EXIT' | 'NONE'
+- `signal_state -> str` — `'LONG_ENTRY'` | `'SHORT_ENTRY'` | `'EXIT'` | `'NONE'`
 - `signal_history(n_days=262) -> pd.DataFrame`
 
 ### Position (core/position.py)
@@ -45,15 +51,26 @@ _Sprint 1 complete. Signatures reflect actual implementation._
 - `get_intraday(instruments, interval='5m') -> pd.DataFrame | None`
 - `refresh(instruments=None) -> None` — raises `NotImplementedError` (deferred to Sprint 3)
 
+---
+
 ## Account (account.py)
 - `get_financing_rates(asset_class: str) -> tuple[float, float]` — (long_rate, short_rate)
 - `get_spread_cost_fallback() -> float`
 - `get_starting_capital() -> float`
 - `get_margin() -> float`
+- `get_margin_rate(asset_class: str) -> float` — per-asset margin rate
+- `get_financing_daily_rate(asset_class: str, side: str) -> float`
 - `save_account(data: dict) -> None`
 
+---
+
 ## Financing Rates (data/account.json)
-- Equity: long 4.88%, short rebate 0.88%
-- FX: long 1.80%, short -1.80% (both sides pay swap)
-- Commodities: long 4.88%, short rebate 0.88%
-- Fixed Income: long 4.88%, short rebate 0.88%
+
+| Asset class | Long rate | Short rebate |
+|-------------|-----------|-------------|
+| Equity | 4.88% p.a. | 0.88% p.a. |
+| FX | 1.80% p.a. | −1.80% p.a. (both sides pay swap) |
+| Commodities | 4.88% p.a. | 0.88% p.a. |
+| Fixed Income | 4.88% p.a. | 0.88% p.a. |
+
+Net daily drag = (long_rate − short_rebate) / 365, compounding over holding period.

@@ -7,9 +7,49 @@ from engine.backtest import load_asset_prices as _wf_load_asset_prices
 from engine.scoring import SCORING_MODES as _WF_SCORING_MODES
 from asset_configs import (
     ASSET_CLASSES, ASSET_CLASS_OPTIONS, FI_EXCLUDE, COMMODITY_EXCLUDE,
-    CROSS_ASSET_COMBINATIONS, _DEFAULT_SCORING_MODE,
+    CROSS_ASSET_COMBINATIONS, _DEFAULT_SCORING_MODE, get_cross_asset_scoring_default,
 )
 from tabs.shared import _CACHE_DIR, _tbl
+
+
+def _interpret_rho(rho: float, p: float) -> tuple[str, str, str]:
+    """
+    Returns (label_text, detail_text, colour_key).
+    Separates statistical significance (p-value) from effect magnitude (|ρ|).
+    Significance threshold: p < 0.05.
+    Magnitude thresholds: |ρ| < 0.05 = negligible, 0.05–0.15 = weak, > 0.15 = moderate+.
+    """
+    significant = p < 0.05
+    mag = abs(rho)
+
+    if not significant:
+        return (
+            "No predictive power",
+            f"ρ = {rho:+.3f}, p = {p:.4f} — not statistically significant.",
+            "grey"
+        )
+
+    if mag < 0.05:
+        magnitude_label = "statistically significant but negligible effect"
+    elif mag < 0.15:
+        magnitude_label = "statistically significant, weak effect"
+    else:
+        magnitude_label = "statistically significant, moderate effect"
+
+    if rho > 0:
+        return (
+            "Positive predictive power",
+            f"ρ = {rho:+.3f}, p = {p:.4f} — {magnitude_label}. "
+            f"IS rank predicts OOS performance.",
+            "green"
+        )
+    else:
+        return (
+            "Negative predictor",
+            f"ρ = {rho:+.3f}, p = {p:.4f} — {magnitude_label}. "
+            f"IS rank is an anti-predictor; consider contrarian mode.",
+            "red"
+        )
 
 
 def render() -> None:
@@ -33,11 +73,21 @@ def render() -> None:
         wf_vol_win = st.number_input("Vol window", 100, 500, 262, key='wf_vol')
     with wf_col3:
         st.markdown("**Scoring & data**")
-        # Auto-default scoring mode when asset class changes
+        # Auto-default scoring mode when asset class or CA selectors change
         _cur_wf_asset  = st.session_state.get('wf_asset', 'equity')
         _prev_wf_asset = st.session_state.get('wf_asset_prev', _cur_wf_asset)
         if _cur_wf_asset != _prev_wf_asset and _cur_wf_asset in _DEFAULT_SCORING_MODE:
             st.session_state['wf_scoring'] = _DEFAULT_SCORING_MODE[_cur_wf_asset]
+
+        if _cur_wf_asset == 'cross_asset':
+            _ss_ca_long  = st.session_state.get('wf_ca_long', 'commodities')
+            _ss_ca_short = st.session_state.get('wf_ca_short', 'fx')
+            _ca_default  = get_cross_asset_scoring_default(_ss_ca_long, _ss_ca_short)
+            if st.session_state.get('_prev_ca_long') != _ss_ca_long \
+               or st.session_state.get('_prev_ca_short') != _ss_ca_short:
+                st.session_state['wf_scoring'] = _ca_default
+                st.session_state['_prev_ca_long'] = _ss_ca_long
+                st.session_state['_prev_ca_short'] = _ss_ca_short
 
         wf_scoring = st.selectbox(
             "Scoring mode", list(_WF_SCORING_MODES.keys()),
@@ -50,12 +100,25 @@ def render() -> None:
         st.session_state['wf_asset_prev'] = wf_asset
 
     # ── Scoring mode recommendation warning ───────────────────────────────────
-    _wf_rec = _DEFAULT_SCORING_MODE.get(wf_asset)
-    if _wf_rec and wf_scoring != _wf_rec:
-        st.warning(
-            f"⚠️ Walk-forward suggests **{_WF_SCORING_MODES[_wf_rec]}** "
-            f"for {dict(ASSET_CLASS_OPTIONS)[wf_asset]} pairs."
+    if wf_asset == 'cross_asset':
+        _ac_labels = dict(ASSET_CLASS_OPTIONS)
+        _ca_rec = get_cross_asset_scoring_default(
+            st.session_state.get('wf_ca_long', 'commodities'),
+            st.session_state.get('wf_ca_short', 'fx'),
         )
+        if wf_scoring != _ca_rec:
+            st.warning(
+                f"⚠️ Walk-forward suggests **{_ca_rec.title()}** mode for "
+                f"{_ac_labels.get(st.session_state.get('wf_ca_long', 'commodities'), '')} × "
+                f"{_ac_labels.get(st.session_state.get('wf_ca_short', 'fx'), '')} pairs."
+            )
+    else:
+        _wf_rec = _DEFAULT_SCORING_MODE.get(wf_asset)
+        if _wf_rec and wf_scoring != _wf_rec:
+            st.warning(
+                f"⚠️ Walk-forward suggests **{_WF_SCORING_MODES[_wf_rec]}** "
+                f"for {dict(ASSET_CLASS_OPTIONS)[wf_asset]} pairs."
+            )
 
     # ── Cross-asset secondary selectors ───────────────────────────────────────
     _ca_long_ac  = 'commodities'
@@ -254,14 +317,14 @@ def render() -> None:
     sm2.metric("p-value",      f"{pval:.4f}")
     sm3.metric("Observations", f"{n_obs:,}")
 
-    if abs(rho) < 0.1 and pval >= 0.05:
-        st.warning(f"**No predictive power** — ρ = {rho:+.3f}, p = {pval:.4f}.")
-    elif rho > 0.1 and pval < 0.05:
-        st.success(f"**Positive predictive power** — ρ = {rho:+.3f}, p = {pval:.4f}.")
-    elif rho < -0.1 and pval < 0.05:
-        st.error(f"**Negative predictor** — ρ = {rho:+.3f}, p = {pval:.4f}.")
+    _rho_label, _rho_detail, _rho_colour = _interpret_rho(rho, pval)
+    _rho_msg = f"**{_rho_label}** — {_rho_detail}"
+    if _rho_colour == 'green':
+        st.success(_rho_msg)
+    elif _rho_colour == 'red':
+        st.error(_rho_msg)
     else:
-        st.info(f"ρ = {rho:+.3f}, p = {pval:.4f} — weak or marginal result.")
+        st.info(_rho_msg)
 
     if not _wf_sum['quintile_df'].empty:
         st.subheader("OOS Performance by IS Quintile")

@@ -217,7 +217,7 @@ def render() -> None:
     cp1, cp2, cp3, cp4, cp5 = st.columns(5)
     vol_window      = cp1.slider("Vol window (days)", 50, 524, 262, 10, key="pa_vol")
     xing_sd         = cp2.slider("Entry SD", 1.0, 3.0, 2.0, 0.1, key="pa_xing")
-    exit_sd         = cp3.slider("Exit SD",  0.0, 1.5, 1.0, 0.1, key="pa_exit")
+    exit_sd         = cp3.slider("Exit SD",  0.0, 2.0, 1.0, 0.1, key="pa_exit")
     pa_trend_window = cp4.slider("Trend filter (days)", 130, 756, 262, 1, key="pa_trend_window")
     _pa_window_opts = {'1 year': 262, '2 years': 524, '3 years': 786, '5 years': 1310, 'All': 0}
     pa_window_label = cp5.selectbox("History window", list(_pa_window_opts.keys()),

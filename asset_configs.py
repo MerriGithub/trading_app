@@ -238,12 +238,30 @@ COMMODITY_EXCLUDE = frozenset({
 })
 
 _DEFAULT_SCORING_MODE = {
-    'equity':       'composite',
+    'equity':       'contrarian',  # WF validated: rho=+0.208, p~0, EXIT_SD=2.0 scalp regime
     'fx':           'composite',
     'fixed_income': 'composite',
     'commodities':  'contrarian',   # WF validated: ρ = +0.122, p = 0.0009
-    'cross_asset':  'composite',    # No WF data yet — neutral default
 }
+
+# Combination-specific scoring mode defaults for cross-asset pairs.
+# Keys are (long_asset_class_key, short_asset_class_key) tuples.
+# Both orderings are included so callers don't need to normalise order.
+# Evidence basis: Walk-forward ρ tests, 2026-05-25.
+CROSS_ASSET_SCORING_MODE: dict[tuple[str, str], str] = {
+    ('commodities', 'fx'):           'composite',   # ρ≈0, p=0.331 — mode irrelevant
+    ('fx', 'commodities'):           'composite',
+    ('commodities', 'fixed_income'): 'composite',   # ρ=+0.069, p=0.0016 — composite positive predictor
+    ('fixed_income', 'commodities'): 'composite',
+    ('equity', 'fx'):                'contrarian',  # ρ=+0.053, p=0.0030 — contrarian validated
+    ('fx', 'equity'):                'contrarian',
+    # All untested combinations → 'composite' as neutral default
+}
+
+
+def get_cross_asset_scoring_default(long_ac: str, short_ac: str) -> str:
+    """Return WF-validated scoring mode default for a cross-asset combination."""
+    return CROSS_ASSET_SCORING_MODE.get((long_ac, short_ac), 'composite')
 
 CROSS_ASSET_COMBINATIONS = [
     ('commodities', 'fx'),           # Primary — Commodity × FX

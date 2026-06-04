@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from itertools import combinations
+from itertools import combinations, permutations
 
 import numpy as np
 import pandas as pd
@@ -67,6 +67,7 @@ def render() -> None:
         _sc_comm_intra = st.checkbox("Commodities",  key='sc_comm_intra')
         _sc_fx_intra   = st.checkbox("FX",           key='sc_fx_intra')
         _sc_fi_intra   = st.checkbox("Fixed Income", key='sc_fi_intra')
+        _sc_eq_intra   = st.checkbox("Equity",       key='sc_eq_intra')
     with _sc2:
         st.markdown("**Cross-asset**")
         _sc_comm_fx  = st.checkbox("Commodities × FX",           key='sc_comm_fx')
@@ -82,7 +83,7 @@ def render() -> None:
         )
     with _pg2:
         _sc_exit_sds = st.multiselect(
-            "Exit SD", [0.5, 1.0, 1.5], default=[0.5, 1.0, 1.5], key='sc_exit_sds',
+            "Exit SD", [0.5, 1.0, 1.5, 2.0], default=[0.5, 1.0, 1.5], key='sc_exit_sds',
         )
     with _pg3:
         _sc_vol_wins = st.multiselect(
@@ -126,7 +127,7 @@ def render() -> None:
 
     if _sc_run:
         _run_scan(
-            _sc_comm_intra, _sc_fx_intra, _sc_fi_intra,
+            _sc_comm_intra, _sc_fx_intra, _sc_fi_intra, _sc_eq_intra,
             _sc_comm_fx, _sc_comm_eq, _sc_comm_fi, _sc_fx_eq,
             _sc_entry_sds, _sc_exit_sds, _sc_vol_wins,
             _sc_broker, _sc_win_days, _sc_win_label, _sc_min_trades,
@@ -138,7 +139,7 @@ def render() -> None:
 
 
 def _run_scan(
-    sc_comm_intra, sc_fx_intra, sc_fi_intra,
+    sc_comm_intra, sc_fx_intra, sc_fi_intra, sc_eq_intra,
     sc_comm_fx, sc_comm_eq, sc_comm_fi, sc_fx_eq,
     sc_entry_sds, sc_exit_sds, sc_vol_wins,
     sc_broker, sc_win_days, sc_win_label, sc_min_trades,
@@ -149,6 +150,7 @@ def _run_scan(
     if sc_comm_intra: _scope_defs.append(('commodities',  'commodities',  True,  'Commodity'))
     if sc_fx_intra:   _scope_defs.append(('fx',           'fx',           True,  'FX'))
     if sc_fi_intra:   _scope_defs.append(('fixed_income', 'fixed_income', True,  'Fixed Income'))
+    if sc_eq_intra:   _scope_defs.append(('equity',       'equity',       True,  'Equity'))
     if sc_comm_fx:    _scope_defs.append(('commodities',  'fx',           False, 'Commodity vs FX'))
     if sc_comm_eq:    _scope_defs.append(('commodities',  'equity',       False, 'Commodity vs Equity'))
     if sc_comm_fi:    _scope_defs.append(('commodities',  'fixed_income', False, 'Commodity vs Fixed Income'))
@@ -179,7 +181,11 @@ def _run_scan(
         _l_insts = [c for c in get_tradeable_instruments(_lk) if c not in _excl(_lk)]
         _s_insts = [c for c in get_tradeable_instruments(_sk) if c not in _excl(_sk)]
         if _intra:
-            _pairs = list(combinations(_l_insts, 2))
+            # Equity uses permutations (both directions scored independently).
+            # All other intra-asset classes use combinations (direction-agnostic).
+            _pairs = (list(permutations(_l_insts, 2))
+                      if _lk == 'equity'
+                      else list(combinations(_l_insts, 2)))
         else:
             _pairs = [(a, b) for a in _l_insts for b in _s_insts]
         _sc_scope_work.append((_lk, _sk, _intra, _label, _l_insts, _s_insts, _pairs))

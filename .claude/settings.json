@@ -17,7 +17,15 @@
       "Bash(python3 -c ' *)",
       "PowerShell(Import-Csv \"c:\\\\Users\\\\gordo\\\\Documents\\\\trading_app\\\\cache\\\\commodity_prices.csv\" | Measure-Object | Select-Object Count; \\(Import-Csv \"c:\\\\Users\\\\gordo\\\\Documents\\\\trading_app\\\\cache\\\\commodity_prices.csv\"\\)[0] | Get-Member -MemberType NoteProperty | Select-Object Name)",
       "PowerShell(Get-ChildItem \"c:\\\\Users\\\\gordo\\\\Documents\\\\trading_app\\\\legacy\\\\\" | Where-Object {$_.Name -match \"stop|trail|lock|research\"} | Select-Object Name)",
-      "PowerShell(C:\\\\Users\\\\gordo\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe -c \"import numpy; print\\('numpy OK'\\)\" 2>&1)"
+      "PowerShell(C:\\\\Users\\\\gordo\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe -c \"import numpy; print\\('numpy OK'\\)\" 2>&1)",
+      "Bash(py -3.12 -c \"import numpy; print\\(numpy.__version__\\)\")",
+      "Bash(py -3.11 -c \"import numpy; print\\(numpy.__version__\\)\")",
+      "Bash(py --list)",
+      "Bash(\"C:\\\\Users\\\\gordo\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe\" -c \"import numpy; print\\(numpy.__version__\\)\")",
+      "Bash(\"C:\\\\Users\\\\gordo\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe\" research/phase4b_grid_research.py)",
+      "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\Documents\\\\trading_app\\\\tabs\" | Select-Object Name)",
+      "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\Documents\\\\trading_app\\\\core\" | Select-Object Name)",
+      "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\Documents\\\\trading_app\\\\engine\" | Select-Object Name)"
     ]
   }
 }
