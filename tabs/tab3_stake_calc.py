@@ -61,7 +61,7 @@ def render() -> None:
     st.caption("Vol-targeted stake sizing across any asset class.")
 
     # Transfer pending pair from Tab 10/12 before widgets are instantiated
-    for _k in ('sc_long', 'sc_short'):
+    for _k in ('sc_long', 'sc_short', 'tab3_vol_window'):
         _pk = f'{_k}_pending'
         if _pk in st.session_state:
             st.session_state[_k] = st.session_state.pop(_pk)
@@ -90,6 +90,12 @@ def render() -> None:
                 "Enter live IG price for instruments where Yahoo price differs. "
                 "Yahoo: raw CSV price, zero financing — reference baseline for comparison."
             ),
+        )
+
+    if st.session_state.get('tab3_from_monitor'):
+        st.info(
+            f"📋 Loaded from watchlist: `{st.session_state['tab3_from_monitor']}`  "
+            f"— pair and vol window pre-filled."
         )
 
     # Broker profile always determines sizing mode — radio is informational only
@@ -383,7 +389,7 @@ def render() -> None:
         st.dataframe(pd.DataFrame(_margin_rows), hide_index=True, use_container_width=True)
 
     st.markdown("---")
-    nc1, nc2, nc3 = st.columns([1, 1, 3])
+    nc1, nc2, nc3, nc4 = st.columns([1, 1, 1, 2])
     if nc1.button("→ Pair Analysis", key="tab3_to_pa"):
         st.session_state['pa_long_pending']  = list(_effective_long)
         st.session_state['pa_short_pending'] = list(_effective_short)
@@ -410,3 +416,30 @@ def render() -> None:
         }
         st.session_state["sidebar_nav_pending"] = "📓 Journal"
         st.rerun()
+    if nc3.button("👁 Monitor", key="tab3_monitor"):
+        from data_watchlist import add_monitor_candidate
+        if not (long_picks and short_picks):
+            st.warning("Select instruments first.")
+        elif len(long_picks) > 1 or len(short_picks) > 1:
+            st.warning("Monitor is for 1v1 pairs only.")
+        else:
+            _dir_flag = "WT" if "WT" in _direction else "CT"
+            add_monitor_candidate({
+                'id':                st.session_state.get('tab3_from_monitor')
+                                     or f"{long_picks[0]}_{short_picks[0]}_monitor",
+                'long':              long_picks[0],
+                'short':             short_picks[0],
+                'entry_sd':          st.session_state.get('pa_xing', 2.0),
+                'exit_sd':           st.session_state.get('pa_exit', 2.0),
+                'vol_window':        vol_window,
+                'trend_window':      st.session_state.get('pa_trend_window', 262),
+                'trend_mode':        'Both passes',
+                'asset_class_long':  _asset_class_of(long_picks[0]),
+                'asset_class_short': _asset_class_of(short_picks[0]),
+                'scoring_mode':      None,
+                'direction':         "CT — Counter-Trend" if _dir_flag == "CT"
+                                     else "WT — With-Trend",
+                'target_exposure':   float(target_1sd),
+                'broker_profile':    broker_profile,
+            })
+            st.toast("Added to monitor candidates in Tab 1")

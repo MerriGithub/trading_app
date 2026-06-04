@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 _WATCHLIST_PATH = os.path.join(os.path.dirname(__file__), "data", "watchlist.json")
 _WF_CACHE_PATH  = os.path.join(os.path.dirname(__file__), "data", "walkforward_cache.json")
+_MONITOR_PATH   = os.path.join(os.path.dirname(__file__), "data", "monitor_candidates.json")
 
 
 def _make_id(
@@ -103,6 +104,41 @@ def update_notes(entry_id: str, notes: str) -> None:
         if e.get("id") == entry_id:
             e["notes"] = notes
     save_watchlist(entries)
+
+
+def load_monitor_candidates() -> list[dict]:
+    if not os.path.exists(_MONITOR_PATH):
+        return []
+    try:
+        with open(_MONITOR_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_monitor_candidates(candidates: list[dict]) -> None:
+    os.makedirs(os.path.dirname(_MONITOR_PATH), exist_ok=True)
+    with open(_MONITOR_PATH, "w", encoding="utf-8") as f:
+        json.dump(candidates, f, indent=2)
+
+
+def add_monitor_candidate(candidate: dict) -> str:
+    candidate = dict(candidate)
+    if "added_to_monitor" not in candidate:
+        candidate["added_to_monitor"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    candidates = load_monitor_candidates()
+    idx = next((i for i, c in enumerate(candidates) if c.get("id") == candidate["id"]), None)
+    if idx is not None:
+        candidates[idx] = _clean_for_json(candidate)
+    else:
+        candidates.append(_clean_for_json(candidate))
+    save_monitor_candidates(candidates)
+    return candidate["id"]
+
+
+def remove_monitor_candidate(candidate_id: str) -> None:
+    candidates = [c for c in load_monitor_candidates() if c.get("id") != candidate_id]
+    save_monitor_candidates(candidates)
 
 
 def load_wf_cache() -> dict:

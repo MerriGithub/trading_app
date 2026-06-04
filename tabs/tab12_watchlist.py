@@ -10,6 +10,15 @@ from data_watchlist import (
     update_notes, save_wf_result,
 )
 from tabs.tab11_walkforward import _run_wf
+from asset_configs import get_display_name
+
+
+def _pair_display(entry: dict) -> str:
+    """Return 'Long display / Short display' for a watchlist entry."""
+    return (
+        f"{get_display_name(entry.get('asset_class_long', 'equity'), entry['long'])} / "
+        f"{get_display_name(entry.get('asset_class_short', 'equity'), entry['short'])}"
+    )
 
 
 _WF_ICONS = {
@@ -148,7 +157,7 @@ def _build_table_df(entries: list, wf_cache: dict) -> pd.DataFrame:
         rows.append({
             'id':           e['id'],
             '_consist':     _cs_num,
-            'Pair':         f"{e['long']} / {e['short']}",
+            'Pair':         _pair_display(e),
             'Asset Classes':f"{e.get('asset_class_long', '?')} × {e.get('asset_class_short', '?')}",
             'Params':       _par,
             'Best Dir':     sm.get('best_dir', '—'),
@@ -322,7 +331,7 @@ def render() -> None:
         options=range(len(filtered)),
         index=_sel_idx,
         format_func=lambda i: (
-            f"{filtered[i]['long']}/{filtered[i]['short']} — "
+            f"{_pair_display(filtered[i])} — "
             f"E{filtered[i]['entry_sd']} X{filtered[i]['exit_sd']} V{filtered[i]['vol_window']}"
         ),
         key="tab12_pair_select",
@@ -336,7 +345,7 @@ def render() -> None:
         sm = entry.get('scan_metrics', {})
         _wf_status, _wf_score = _get_wf_status(entry, wf_cache)
         d1, d2, d3, d4, d5 = st.columns(5)
-        d1.metric("Pair",       f"{entry['long']} / {entry['short']}")
+        d1.metric("Pair",       _pair_display(entry))
         d2.metric("Best Dir",   sm.get('best_dir', '—'))
         d3.metric("WT Trades",  sm.get('trades_wt', '—'))
         d4.metric("WT Avg Net", f"{sm['avg_net_wt']*100:+.2f}%" if sm.get('avg_net_wt') is not None else '—')
@@ -356,8 +365,7 @@ def render() -> None:
             ]
             if len(_all_for_pair) > 1:
                 with st.expander(
-                    f"📊 All {len(_all_for_pair)} parameter sets for "
-                    f"{entry['long']}/{entry['short']}",
+                    f"📊 All {len(_all_for_pair)} parameter sets for " + _pair_display(entry),
                     expanded=False,
                 ):
                     _alt_rows = []
@@ -401,8 +409,10 @@ def render() -> None:
             st.rerun()
 
         if ab2.button("→ Stake Calc", key=f"wl_to_sc_{entry['id']}"):
-            st.session_state['sc_long_pending']  = [entry['long']]
-            st.session_state['sc_short_pending'] = [entry['short']]
+            st.session_state['sc_long_pending']         = [entry['long']]
+            st.session_state['sc_short_pending']        = [entry['short']]
+            st.session_state['tab3_vol_window_pending'] = entry['vol_window']
+            st.session_state['tab3_from_monitor']       = entry['id']
             _best_dir = (entry.get('scan_metrics') or {}).get('best_dir', 'WT')
             st.session_state['tab3_direction'] = (
                 "CT — Counter-Trend" if _best_dir == "CT" else "WT — With-Trend"
@@ -499,7 +509,7 @@ def render() -> None:
             st.session_state['wl_pending_remove'] = entry['id']
 
         if st.session_state.get('wl_pending_remove') == entry['id']:
-            st.warning(f"Remove **{entry['long']}/{entry['short']}** from the watchlist?")
+            st.warning(f"Remove **{_pair_display(entry)}** from the watchlist?")
             rc1, rc2 = st.columns(2)
             if rc1.button("✔ Confirm", key=f"wl_confirm_{entry['id']}"):
                 remove_from_watchlist(entry['id'])
