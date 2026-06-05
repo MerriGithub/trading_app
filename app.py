@@ -4,6 +4,16 @@ Multi-asset, NvM basket spread trading monitor and journal.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Ensure trading_app/ is always on sys.path regardless of launch method.
+# Streamlit adds the script directory normally, but VS Code and other IDEs
+# can launch from the workspace root instead, breaking local package imports.
+_APP_DIR = Path(__file__).resolve().parent
+if str(_APP_DIR) not in sys.path:
+    sys.path.insert(0, str(_APP_DIR))
+
 import streamlit as st
 
 from logging_config import configure_logging
