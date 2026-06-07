@@ -25,6 +25,29 @@ without Obsidian access.
 
 ---
 
+## ⚠️ Python interpreter — always use the full path
+
+**Dev PC interpreter:**
+```
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe
+```
+
+Use this explicit path for every `python`, `pytest`, and `pip` invocation. Do not
+rely on PATH-resolved `python` or `pytest` shims — they may resolve to the wrong
+interpreter and waste time on environment debugging.
+
+```bash
+# Correct form for all commands on the dev PC:
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pytest tests/ -q
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m streamlit run app.py --server.port 8502
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pip install -r requirements.txt
+```
+
+VS Code is configured to use this interpreter. The integrated terminal uses it
+automatically. For standalone Claude Code tool calls, always use the full path.
+
+---
+
 ## Project scope
 
 **Project root:** `trading_app/`
@@ -48,24 +71,23 @@ paths for cache and data files and will fail if run from the workspace root.
 cd trading_app
 
 # Run the rebuild app (port 8502)
-python -m streamlit run app.py --server.port 8502
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m streamlit run app.py --server.port 8502
 
 # Run the legacy benchmark (port 8501 — read-only, do not modify)
-python -m streamlit run legacy/app_legacy.py --server.port 8501
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m streamlit run legacy/app_legacy.py --server.port 8501
 
 # Run all tests
-pytest tests/
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pytest tests/
 
 # Run a single test file
-pytest tests/test_signal.py
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pytest tests/test_signal.py
 
 # Install dependencies
-pip install -r requirements.txt
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pip install -r requirements.txt
 ```
 
-`python -m streamlit` is preferred over a bare `streamlit` command — it ensures
-the correct interpreter and environment are used regardless of how PATH is
-configured on the current machine.
+Always use the full interpreter path — never bare `python`, `pytest`, or `pip`.
+See the **Python interpreter** section above.
 
 ---
 
@@ -87,6 +109,14 @@ configured on the current machine.
 | H | Exit formula: `side * d <= EXIT_SD` | Correct form: **`-side * d <= EXIT_SD`** (sign inverted). Expanded: `(side==-1 and d<=EXIT_SD) or (side==+1 and d>=-EXIT_SD)`. The wrong form fires at entry. **A module-level assertion in `engine/numba_core.py` enforces this at import time — do not remove it.** | 2026-06-02 |
 | I | `dist_sd_at_entry = d` (signed) | Must be **`abs(d)`** — signed values cancel across long/short sides and produce near-zero averages. **A module-level assertion in `engine/numba_core.py` enforces this at import time — do not remove it.** | 2026-06-02 |
 | J | Tab 6 = Journal | Tab 6 = **Live Monitor** (`tab6_live_monitor.py`). Journal = Tab 7. Tab 6 shows signal alerts and live signal state for watchlist pairs. | 2026-06-04 |
+| K | Tab 10 scan uses `engine/search.py` | Tab 10 uses **`engine/backtest.py`** (`prepare_returns`, `run_backtest`, `aggregate_trades`). `engine/search.py` is the 3v3/4v4 multi-leg basket scanner for Tab 8 only. Daily scan batch must follow Tab 10 pattern. | 2026-06-05 |
+| L | Tab 3 margin accurate for all commodities | **Tab 3 margin was 100× too low for BRENT, WTI, COFFEE, SUGAR** — Yahoo delivers USD/USc, IG quotes in pence. `ig_price_override` added to all four in `asset_configs.py`. CORN, WHEAT, SOYBEANS unaffected. | 2026-06-05 |
+| M | `get_financing_daily_rate` takes 2 args | **Actual signature is `(instrument_code, asset_class, direction, price, broker_profile)`** — 5 args. ARCHITECTURE.md shows a simplified version. Always use the full signature from `account.py` directly. | 2026-06-06 |
+| N | `registry.refresh()` raises `NotImplementedError` | **`DataRegistry.refresh()` is fully implemented** — fetches missing rows only, appends, deduplicates. ARCHITECTURE.md note is outdated. | 2026-06-06 |
+| O | `rolling_mean_std` can be imported inside a function | **Must be imported at module level** — local import inside `_compute_current_sd()` fails. Add to top-level `from engine.numba_core import ... rolling_mean_std` block. | 2026-06-06 |
+| P | `wf_summary['n_obs']` = OOS trade count | **`n_obs` is the number of WF windows**, not OOS trades. Use `_oos_stats_from_wf(wf_df, long_i)` to read `OOS_Trades`, `OOS_WinRate`, `OOS_Gross` from the WF DataFrame directly. | 2026-06-06 |
+| Q | positions.json instruments at top-level keys | Instruments are **nested**: `pos['basket']['long_legs'][0]` and `pos['basket']['short_legs'][0]`. Keys `long_instrument`, `long`, `short`, `short_instrument` do not exist — silent `''` return. | 2026-06-06 |
+| R | `sidebar_nav_pending` value omits emoji | Sidebar entry strings include emojis: **`'📈 Pair Analysis'`** not `'Pair Analysis'`. Plain string silently fails to match — navigation never fires. Always use the full string with emoji. | 2026-06-06 |
 
 ---
 
@@ -106,7 +136,7 @@ FX pairs, commodities, and fixed income.
 ```
 app.py                    # Streamlit entry point; imports tabs/
 logging_config.py         # Centralised logging — configure_logging() called once from app.py
-tabs/tab1.py … tab12.py   # One file per UI tab
+tabs/tab1.py … tab13.py   # One file per UI tab
 tabs/shared.py            # Singleton helpers (portfolio, registry, account)
 engine/                   # Backtest, search, scoring, walk-forward
   numba_core.py           # JIT-compiled loops + pure-Python fallback (keep both in sync)
@@ -116,21 +146,27 @@ asset_configs.py          # Instrument definitions — authoritative for all ass
 config.py                 # Algorithm parameters + legacy equity mappings
 data.py                   # Yahoo Finance fetch + CSV cache
 account.py                # Financing rates, margin; loads from data/account.json
+research/daily_scan.py    # Overnight batch scan — runs without Streamlit
+scripts/                  # Task Scheduler wrappers (run_daily_scan.ps1 / .bat)
+data/scan_config.json     # Named search registry (algo + WF params per search)
+data/daily_scan_results.json  # Latest overnight scan output (read by Tab 13)
+data/scan_history/        # Per-run archived results (YYYY-MM-DD_HHMM.json)
 ```
 
 ### Tab map
 
 | Tab file | Purpose | Key session state |
 |----------|---------|-------------------|
-| `tab2_pair_analysis.py` | Pair Analysis | `pa_vol`, `pa_xing`, `pa_exit`, `pa_trend_window`, `pa_wl_id` |
-| `tab3_stake_calc.py` | Stake Calculator | `tab3_direction`, `_pricing_broker`, `tab3_broker_profile` |
+| `tab2_pair_analysis.py` | Pair Analysis | `pa_vol`, `pa_xing`, `pa_exit`, `pa_trend_window`, `pa_wl_id`, `pa_long_pending`, `pa_short_pending`, `pa_pair_pending` |
+| `tab3_stake_calc.py` | Stake Calculator | `tab3_direction`, `_pricing_broker`, `tab3_broker_profile`, `sc_long_pending`, `sc_short_pending` |
 | `tab6_live_monitor.py` | Live Monitor | signal alerts, watchlist signal states |
 | `tab7_journal.py` | Trade Journal | `tab7_pending_entry` |
 | `tab8_backtest.py` | Backtest | `bt_scoring_mode`, `bt_ca_scoring` |
 | `tab9_walkforward.py` | Trade Validation (Q11) | `wf_scoring`, `wf_ca_long`, `wf_ca_short` |
 | `tab10_scenario.py` | Scenario Scanner | `tab10_min_wt_trades`, `tab10_broker_profile` |
-| `tab11_walkforward.py` | Single-pair rolling WF | `wf_pair` |
+| `tab11_walkforward.py` | Single-pair rolling WF | `wf_pair`, `wf11_long_pending`, `wf11_short_pending` |
 | `tab12_watchlist.py` | Watchlist | `tab12_selected_id`, `tab12_selected_entry`, `tab12_dedup` |
+| `tab13_daily_scan.py` | Daily Scan — overnight batch results + AI review | `tab13_dedup` |
 
 **Navigation:** always use `st.session_state['sidebar_nav_pending']`, never write
 `sidebar_nav` directly — crashes on rerun (register item B).
@@ -302,7 +338,7 @@ median hold 1d — exits on noise). Do not go above 2.0 for equities.
 ### Compliance check — run before ending any session
 
 ```bash
-pytest tests/ -q
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pytest tests/ -q
 grep -r "print("        trading_app/ --include="*.py" --exclude-dir=legacy
 grep -r "except:"       trading_app/ --include="*.py" --exclude-dir=legacy
 grep -r "except Exception:" trading_app/ --include="*.py" --exclude-dir=legacy

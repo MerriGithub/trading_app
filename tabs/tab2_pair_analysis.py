@@ -179,7 +179,7 @@ def render() -> None:
     from data_watchlist import load_watchlist as _load_wl
     _wl_entries = _load_wl()
     _wl_choices = [
-        f"★ {e['long']} / {e['short']}  E{e['entry_sd']} X{e['exit_sd']} V{e['vol_window']}"
+        f"★ {ALL_DISPLAY.get(e['long'], e['long'])} / {ALL_DISPLAY.get(e['short'], e['short'])}  E{e['entry_sd']} X{e['exit_sd']} V{e['vol_window']}"
         for e in _wl_entries
     ]
     _wl_map: dict[str, dict] = dict(zip(_wl_choices, _wl_entries))

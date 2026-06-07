@@ -30,5 +30,34 @@
     },
     "realised_pnl": 99.32500351562425,
     "pct_open": 0.0
+  },
+  {
+    "id": "20260604_144445",
+    "name": "ASX200/CAC40",
+    "basket": {
+      "long_legs": [
+        "CIL"
+      ],
+      "short_legs": [
+        "CBK"
+      ]
+    },
+    "direction": "long_spread",
+    "entry_date": "2026-06-04",
+    "entry_prices": {
+      "CIL": 8717.0,
+      "CBK": 8228.0
+    },
+    "stakes": {
+      "CIL": 3.84,
+      "CBK": -3.45
+    },
+    "target_exposure": 250.0,
+    "comments": "",
+    "status": "open",
+    "exit_date": null,
+    "exit_prices": {},
+    "realised_pnl": 0.0,
+    "pct_open": 1.0
   }
 ]

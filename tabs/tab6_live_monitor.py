@@ -21,6 +21,7 @@ import streamlit as st
 from tabs.shared import (
     portfolio, registry,
     _cached_latest_prices, _get_signal_metrics, _check_signal_alerts,
+    _compute_risk_metrics,
     ALL_DISPLAY, _CACHE_DIR,
 )
 
@@ -111,11 +112,12 @@ def render() -> None:
             f"**{_pos.name}** — {' × '.join(ALL_DISPLAY.get(i, i) for i in _insts)}",
             expanded=True,
         ):
+            # Fetch once; reused by col_signal display and risk overlay below.
+            _sm = _get_signal_metrics(_pos)
             col_signal, col_prices, col_intraday = st.columns([2, 2, 3])
 
             with col_signal:
                 st.markdown("**Signal**")
-                _sm = _get_signal_metrics(_pos)
                 if _sm and 'error' not in _sm:
                     _sd    = _sm['current_sd']
                     _state = _sm['signal_state']
@@ -169,8 +171,118 @@ def render() -> None:
                       delta="▲" if _net_pnl > 0 else "▼",
                       delta_color="normal")
 
+            # ── Risk overlay ──────────────────────────────────────────────
+            if _sm and 'error' not in _sm:
+                _risk = _compute_risk_metrics(_pos, _sm)
+            else:
+                _risk = {
+                    'data_ok': False, 'rag': 'amber',
+                    'rag_reasons': ['amber:signal data unavailable'],
+                }
+            _rag_emoji = {'green': '🟢', 'amber': '🟡', 'red': '🔴'}[_risk['rag']]
+            _rag_label = {'green': 'Risk OK', 'amber': 'Watch', 'red': 'Alert'}[_risk['rag']]
+            with st.expander(f"{_rag_emoji} {_rag_label}", expanded=(_risk['rag'] == 'red')):
+                if _risk.get('data_ok', False):
+                    _render_risk_overlay(_pos, _risk)
+                else:
+                    st.caption("⚠ Risk metrics unavailable — signal data could not be computed.")
+
     st.divider()
     _render_market_overview()
+
+
+def _render_risk_overlay(pos, risk: dict) -> None:
+    """Render the risk overlay panel inside a position expander.
+
+    Three sections (Signal Trend / Stop Context / Hold Context) separated by
+    dividers. Called only when risk['data_ok'] is True.
+
+    Args:
+        pos: Open Position object. Used for pos.direction and pos.days_held.
+        risk: Dict returned by _compute_risk_metrics(). Must have data_ok=True.
+    """
+    # Fix 2 (review): derive side for direction-aware reverting checks so that
+    # both sd_change and velocity captions are correct for longs and shorts.
+    _side = 1 if pos.direction == 'long_spread' else -1
+
+    # ── Section 1 — Signal Trend ─────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("**SD vs Entry**")
+        sd_change = risk['sd_change']
+        if not pd.isna(sd_change):
+            _reverting = sd_change * _side > 0
+            st.metric("Change", f"{sd_change:+.3f} SD")
+            st.caption("↗ toward zero ✓" if _reverting else "↘ extending ✗")
+        else:
+            st.caption("N/A")
+    with c2:
+        st.markdown("**5d Trend**")
+        slope = risk['sd_5d_slope']
+        st.metric("Slope", f"{slope:+.4f}")
+        st.caption("↗ Reverting" if slope > 0 else "↘ Extending")
+    with c3:
+        st.markdown("**Days Extending**")
+        dae = risk['days_at_extreme']
+        _dae_label = "🔴" if dae > 5 else ("🟡" if dae > 3 else "🟢")
+        st.metric("Days", dae)
+        st.caption(f"{_dae_label} consecutive adverse days")
+
+    st.divider()
+
+    # ── Section 2 — Stop Context ─────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("**Hard Stop Level**")
+        st.metric("Stop", f"{risk['stop_sd']:.1f} SD")
+        st.caption("(from research defaults)")
+    with c2:
+        st.markdown("**Distance to Stop**")
+        dts = risk['dist_to_stop_sd']
+        dtp = risk['dist_to_stop_pct']
+        if not pd.isna(dts):
+            st.metric("Buffer", f"{dts:.2f} SD")
+            st.caption(f"{dtp * 100:.0f}% of stop range remaining")
+        else:
+            st.caption("N/A")
+    with c3:
+        st.markdown("**Worst Point (MAE)**")
+        mae = risk['mae_sd']
+        if not pd.isna(mae):
+            st.metric("MAE", f"{mae:.2f} SD")
+            st.caption("since entry")
+        else:
+            st.caption("N/A")
+
+    st.divider()
+
+    # ── Section 3 — Hold Context ─────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("**Days Held**")
+        st.metric("Days", pos.days_held)
+    with c2:
+        st.markdown("**vs Expected**")
+        ratio = risk['days_held_ratio']
+        avg   = risk['avg_hold_days']
+        if not pd.isna(ratio):
+            _hold_label = "🔴" if ratio > 1.5 else ("🟡" if ratio > 1.0 else "🟢")
+            st.metric("Progress", f"{pos.days_held}d / {avg:.0f}d avg")
+            st.caption(f"{_hold_label} {ratio * 100:.0f}% of avg hold")
+        else:
+            st.caption("N/A")
+    with c3:
+        st.markdown("**Velocity (3d avg)**")
+        vel = risk['velocity_3d_avg']
+        # Direction-aware: reverting means vel * side > 0
+        _vel_reverting = vel * _side > 0
+        st.metric("Velocity", f"{vel:.4f}")
+        st.caption("↗ reverting" if _vel_reverting else "↘ extending")
+
+    if risk.get('rag_reasons'):
+        st.caption("Active alerts: " + " | ".join(
+            r.split(':', 1)[1] for r in risk['rag_reasons']
+        ))
 
 
 def _render_market_overview() -> None:

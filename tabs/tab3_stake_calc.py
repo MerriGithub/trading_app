@@ -41,7 +41,7 @@ from tabs.shared import (
     registry, ALL_INSTRUMENTS, ALL_DISPLAY, _asset_class_of,
 )
 
-_SB_MIN  = 0.50   # £/pt minimum (IG/CMC)
+_SB_MIN  = 0.04   # £/pt minimum (IG default — per-instrument overrides in asset_configs.py)
 _CFD_MIN = 1      # contracts minimum
 
 _UNIT_LABELS: dict[str, str] = {

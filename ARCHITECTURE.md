@@ -7,9 +7,17 @@ _Sprint 1 complete. Signatures reflect actual implementation._
 > rules, and research optimums, see `CLAUDE.md`.
 
 ---
-## Python Path with project dependencies
-cd "c:\Users\gordo\Documents\trading_app" 
-C:\Users\gordo\AppData\Local\Python\bin\python.exe"
+
+## Python interpreter and project path
+
+```bash
+cd "C:\Users\gordo\Documents\trading_app"
+C:\Users\gordo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pytest tests/ -q
+```
+
+Use the full interpreter path for all `python`, `pytest`, and `pip` invocations.
+`bin\python.exe` does not exist — the correct binary is under `pythoncore-3.14-64\`.
+See `CLAUDE.md` for the full commands reference.
 
 ## Domain Layer
 
@@ -52,7 +60,7 @@ C:\Users\gordo\AppData\Local\Python\bin\python.exe"
 - `get_vols(instruments, window=262) -> dict[str, float]`
 - `get_scalings(instruments, target_vol=0.01) -> dict[str, float]`
 - `get_intraday(instruments, interval='5m') -> pd.DataFrame | None`
-- `refresh(instruments=None) -> None` — raises `NotImplementedError` (deferred to Sprint 3)
+- `refresh(instruments=None) -> None` — **fully implemented** (fetches missing rows, appends, deduplicates). The `NotImplementedError` note was a Sprint 3 placeholder that has since been implemented. Do not treat this as unimplemented.
 
 ---
 
@@ -62,7 +70,7 @@ C:\Users\gordo\AppData\Local\Python\bin\python.exe"
 - `get_starting_capital() -> float`
 - `get_margin() -> float`
 - `get_margin_rate(asset_class: str) -> float` — per-asset margin rate
-- `get_financing_daily_rate(asset_class: str, side: str) -> float`
+- `get_financing_daily_rate(instrument_code: str, asset_class: str, direction: str, price: float, broker_profile: str) -> float` — ⚠️ **5 args, not 2**. The simplified 2-arg form shown in older specs is wrong. Always use all 5 args (register item M).
 - `save_account(data: dict) -> None`
 
 ---

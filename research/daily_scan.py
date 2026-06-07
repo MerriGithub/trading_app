@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import keyring
 import logging
+import os
 import sys
 import time
 import urllib.error
@@ -962,28 +963,52 @@ def run_cross_asset_search(search: dict, global_settings: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _get_api_key() -> str:
-    """Retrieve the Anthropic API key from Windows Credential Manager.
+    """Retrieve the Anthropic API key using a two-stage fallback chain.
+
+    Tries Windows Credential Manager via keyring first (preferred — credentials
+    never appear in logs or environment). Falls back to the ANTHROPIC_API_KEY
+    environment variable for headless/batch environments where keyring is
+    unavailable or not configured.
+
+    This allows the script to run on both the dev PC (keyring configured) and
+    the batch PC (Task Scheduler env var configured) without any code or config
+    changes on either machine.
 
     Returns:
-        The API key string, or empty string if not found.
+        API key string, or empty string if neither source yields a key.
+        Logs a descriptive warning naming both configuration methods when
+        both sources are absent.
 
     Notes:
-        Store once via:
-            python -c "import keyring; keyring.set_password('trading_app', 'anthropic_api_key', 'sk-ant-...')"
-        or via Windows Credential Manager UI:
-            Internet or network address: trading_app
-            User name:                   anthropic_api_key
-            Password:                    sk-ant-...
+        To configure keyring (dev PC / interactive use):
+            python -c "import keyring; keyring.set_password(
+                'trading_app', 'anthropic_api_key', 'sk-ant-...')"
+
+        To configure env var (batch PC / Task Scheduler):
+            Option A — add to run_daily_scan.ps1 before the python call:
+                $env:ANTHROPIC_API_KEY = 'sk-ant-...'
+            Option B — set in Task Scheduler action environment variables:
+                ANTHROPIC_API_KEY = sk-ant-...
     """
-    key = keyring.get_password('trading_app', 'anthropic_api_key')
-    if not key:
-        logger.warning(
-            "Anthropic API key not found in credential store "
-            "(service='trading_app', username='anthropic_api_key'). "
-            "AI review will be skipped."
-        )
-        return ''
-    return key
+    # Stage 1: Windows Credential Manager (preferred — never logged)
+    try:
+        key = keyring.get_password('trading_app', 'anthropic_api_key')
+        if key:
+            return key
+    except Exception:  # keyring may raise (not just return None) on headless systems
+        pass
+
+    # Stage 2: environment variable (Task Scheduler / CI fallback)
+    key = os.environ.get('ANTHROPIC_API_KEY', '')
+    if key:
+        return key
+
+    logger.warning(
+        "Anthropic API key not found. "
+        "Set via keyring: keyring.set_password('trading_app', 'anthropic_api_key', 'sk-ant-...') "
+        "or set environment variable ANTHROPIC_API_KEY. AI review will be skipped."
+    )
+    return ''
 
 
 _AI_SYSTEM_PROMPT = (

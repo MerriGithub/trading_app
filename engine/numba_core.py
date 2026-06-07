@@ -480,6 +480,192 @@ def backtest_spread(spread_returns, vol_window, xing_sd, exit_sd, day_ints, max_
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 3b. EXTENDED SINGLE-SERIES BACKTEST WITH HARD STOP AND MAE TRACKING
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Extended trade array column indices — appended after the existing COL_* columns.
+# Only backtest_spread_with_stop() returns an 8-column array; all other functions
+# return the original 5-column array indexed by COL_ENTRY_IDX … COL_HOLDING_DAYS.
+COL_MAE_SD   = 5  # worst adverse dist_sd reached during trade (always >= 0)
+COL_ENTRY_SD = 6  # abs(dist_sd) at entry — register item I: always abs()
+COL_STOPPED  = 7  # 1.0 if stopped out via hard stop, 0.0 if normal exit
+
+
+def backtest_spread_with_stop(
+    spread_returns: np.ndarray,
+    vol_window: int,
+    xing_sd: float,
+    exit_sd: float,
+    stop_sd: float,
+    day_ints: np.ndarray,
+    max_hold_days: int = 300,
+) -> tuple[np.ndarray, int]:
+    """Extended single-series backtest with hard stop and MAE tracking.
+
+    Identical logic to backtest_spread() / _ref_detect_trades() but adds:
+      - Hard stop: exit immediately if spread moves stop_sd beyond entry on
+        the adverse side (further away from zero than the entry threshold).
+      - MAE tracking: worst adverse dist_sd reached during each trade.
+      - Stop flag: whether exit was a hard stop or normal signal exit.
+
+    Stop logic (for a long trade, side=+1):
+        Entry fires when d < -xing_sd (spread extended downward).
+        Adverse direction is further downward (d going more negative).
+        Hard stop fires when d < -stop_sd.
+        → stop_hit = (side == 1 and d < -stop_sd) or (side == -1 and d > stop_sd)
+        Equivalently: -side * d > stop_sd
+
+    Exit condition (register item H — sign is intentionally inverted):
+        Normal exit: (side == -1 and d <= exit_sd) or (side == 1 and d >= -exit_sd)
+        Do NOT alter this form. See module docstring.
+
+    Entry dislocation (register item I — always abs):
+        COL_ENTRY_SD stores abs(d) at entry, not signed d.
+
+    MAE tracking:
+        On each bar after entry, adverse_d = -side * d (positive when d moves
+        in the wrong direction).  current_mae is updated to the running maximum
+        of adverse_d.  Reset to 0.0 at the start of each new trade.
+
+    Performance note:
+        This function is pure Python and is intended for research scripts only.
+        Do NOT wire into Tab 8/9/10/11 batch search or walk-forward pipelines —
+        use batch_backtest() for those paths.  MAE tracking requires per-trade
+        state that is incompatible with the fixed-shape batch result array.
+
+    Args:
+        spread_returns: Daily spread returns, shape (T,), dtype float64.
+            Must be a numpy ndarray, not a pandas Series.
+        vol_window: Rolling window in trading days (e.g. 262).
+        xing_sd: Entry threshold in standard deviations (e.g. 2.0).
+        exit_sd: Normal exit threshold in SD units (e.g. 0.5 for commodities,
+            2.0 for equities).  Register item H sign applies to exit condition.
+        stop_sd: Hard stop threshold in SD units.  Must be > xing_sd.
+            Stop fires if spread moves stop_sd beyond the zero line on the
+            adverse side after entry.
+        day_ints: Integer day index per row, shape (T,), dtype int64.
+        max_hold_days: Maximum holding period before forced exit.  Default 300.
+            Forced-hold exits are NOT flagged as stops (COL_STOPPED stays 0.0).
+
+    Returns:
+        Tuple (trades, n_trades) where trades is shape (n_trades, 8) with
+        columns indexed by COL_ENTRY_IDX, COL_EXIT_IDX, COL_SIDE,
+        COL_GROSS_RETURN, COL_HOLDING_DAYS, COL_MAE_SD, COL_ENTRY_SD,
+        COL_STOPPED.
+
+    Raises:
+        TypeError: If spread_returns or day_ints are not numpy ndarrays.
+        ValueError: If stop_sd <= xing_sd (stop would fire at or before entry).
+        ValueError: If stop_sd <= exit_sd (stop would fire before normal exit).
+    """
+    if not isinstance(spread_returns, np.ndarray):
+        raise TypeError(
+            f"backtest_spread_with_stop: spread_returns must be a numpy ndarray; "
+            f"got {type(spread_returns).__name__}. "
+            f"Extract .values from a pandas Series before calling."
+        )
+    if not isinstance(day_ints, np.ndarray):
+        raise TypeError(
+            f"backtest_spread_with_stop: day_ints must be a numpy ndarray; "
+            f"got {type(day_ints).__name__}"
+        )
+    if stop_sd <= xing_sd:
+        raise ValueError(
+            f"backtest_spread_with_stop: stop_sd ({stop_sd}) must be > xing_sd ({xing_sd}). "
+            f"A stop at or inside the entry threshold would fire immediately after entry."
+        )
+    if stop_sd <= exit_sd:
+        raise ValueError(
+            f"backtest_spread_with_stop: stop_sd ({stop_sd}) must be > exit_sd ({exit_sd}). "
+            f"Hard stop should be set beyond the normal exit threshold."
+        )
+
+    # Compute cum and dist_sd identically to backtest_spread()
+    cum = np.cumprod(1.0 + spread_returns)
+    roll_mean, roll_std = rolling_mean_std(cum, vol_window)
+
+    dist_sd_arr = np.full_like(cum, np.nan)
+    for i in range(len(cum)):
+        if not np.isnan(roll_std[i]) and roll_std[i] > 0:
+            dist_sd_arr[i] = (cum[i] - roll_mean[i]) / roll_std[i]
+
+    T = len(cum)
+    max_trades = T // 2 + 1
+    trades = np.zeros((max_trades, 8), dtype=np.float64)
+    n = 0
+
+    in_trade = False
+    entry_idx = 0
+    entry_cum = 0.0
+    entry_d = 0.0
+    side = 0
+    current_mae = 0.0
+
+    for i in range(T):
+        d = dist_sd_arr[i]
+        if np.isnan(d):
+            continue
+
+        if not in_trade:
+            if d > xing_sd:
+                in_trade = True
+                entry_idx = i
+                entry_cum = cum[i]
+                entry_d = d
+                side = -1
+                current_mae = 0.0
+            elif d < -xing_sd:
+                in_trade = True
+                entry_idx = i
+                entry_cum = cum[i]
+                entry_d = d
+                side = 1
+                current_mae = 0.0
+        else:
+            # Update MAE: adverse_d is positive when d moves in the wrong direction.
+            # For LONG (side=+1): adverse = -d (d going more negative is bad).
+            # For SHORT (side=-1): adverse = +d (d going more positive is bad).
+            adverse_d = -side * d
+            if adverse_d > current_mae:
+                current_mae = adverse_d
+
+            # Stop check takes priority (evaluated before normal exit).
+            # Fires when spread extends adversely past stop_sd.
+            stop_hit = (side == 1 and d < -stop_sd) or (side == -1 and d > stop_sd)
+
+            # Normal exit (REGISTER ITEM H — sign intentionally inverted; see module docstring).
+            # Correct form: -side * d <= exit_sd
+            # Expanded: side==-1 exits when d<=exit_sd; side==+1 exits when d>=-exit_sd
+            exit_condition = (
+                (side == -1 and d <= exit_sd) or
+                (side == 1 and d >= -exit_sd) or
+                (day_ints[i] - day_ints[entry_idx] >= max_hold_days)
+            )
+
+            if stop_hit or exit_condition:
+                exit_cum = cum[i]
+                if side == 1:
+                    gross_ret = (exit_cum - entry_cum) / entry_cum
+                else:
+                    gross_ret = (entry_cum - exit_cum) / entry_cum
+                holding = day_ints[i] - day_ints[entry_idx]
+
+                trades[n, COL_ENTRY_IDX] = entry_idx
+                trades[n, COL_EXIT_IDX] = i
+                trades[n, COL_SIDE] = side
+                trades[n, COL_GROSS_RETURN] = gross_ret
+                trades[n, COL_HOLDING_DAYS] = holding
+                trades[n, COL_MAE_SD] = current_mae
+                trades[n, COL_ENTRY_SD] = abs(entry_d)  # register item I: always abs
+                # max_hold forced exit is not a hard stop (COL_STOPPED remains 0.0)
+                trades[n, COL_STOPPED] = 1.0 if stop_hit else 0.0
+                n += 1
+                in_trade = False
+
+    return trades[:n], n
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 4. BATCH CROSSING BACKTEST (parallel over M combinations)
 # ═══════════════════════════════════════════════════════════════════════════
 

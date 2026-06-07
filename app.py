@@ -38,6 +38,7 @@ import tabs.tab9_walkforward   as tab9
 import tabs.tab10_scenario     as tab10
 import tabs.tab11_walkforward  as tab11
 import tabs.tab12_watchlist    as tab12
+import tabs.tab13_daily_scan   as tab13
 
 st.set_page_config(
     page_title="Spread Trading Platform",
@@ -86,6 +87,7 @@ _TABS = [
     "🎯 Scenario",
     "🔀 Walk-Forward",
     "🗂️ Watchlist",
+    "📅 Daily Scan",
 ]
 
 if 'sidebar_nav_pending' in st.session_state:
@@ -175,3 +177,5 @@ elif _active_tab == _TABS[10]: # Walk-Forward
     tab11.render()
 elif _active_tab == _TABS[11]: # Watchlist
     tab12.render()
+elif _active_tab == _TABS[12]: # Daily Scan
+    tab13.render()
