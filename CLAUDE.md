@@ -117,6 +117,7 @@ See the **Python interpreter** section above.
 | P | `wf_summary['n_obs']` = OOS trade count | **`n_obs` is the number of WF windows**, not OOS trades. Use `_oos_stats_from_wf(wf_df, long_i)` to read `OOS_Trades`, `OOS_WinRate`, `OOS_Gross` from the WF DataFrame directly. | 2026-06-06 |
 | Q | positions.json instruments at top-level keys | Instruments are **nested**: `pos['basket']['long_legs'][0]` and `pos['basket']['short_legs'][0]`. Keys `long_instrument`, `long`, `short`, `short_instrument` do not exist — silent `''` return. | 2026-06-06 |
 | R | `sidebar_nav_pending` value omits emoji | Sidebar entry strings include emojis: **`'📈 Pair Analysis'`** not `'Pair Analysis'`. Plain string silently fails to match — navigation never fires. Always use the full string with emoji. | 2026-06-06 |
+| S | Benchmark "Commodity 1v1 exhaustive, AvgNet ~5.40%, WR ~87%, AvgHold ~121d" is a universe average | These figures are **NATGAS/BRENT single-pair counter-trend gross** (vol-scaled units), not a universe average — see benchmark table correction below. **All Tab 8 AvgNet/Expectancy figures are vol-scaled (~1% daily vol/leg), not real % on capital.** Vol scaling varies by instrument (NATGAS ~0.264 → ~3× raw). Net for NATGAS/BRENT CT = **+1.60%**. Universe contrarian-top mean at exit=0.0 = **−6.78%** (3/30 positive). See Decision 108 in Project Reference. | 2026-06-07 |
 
 ---
 
@@ -285,7 +286,7 @@ commodity benchmarks for comparison.
 | Test | Expected result |
 |------|----------------|
 | Equity 3v3 exhaustive (SD=2.0/0.0, Vol=262, 4.88%) | Net −0.122, WR 86.4%, AvgHold 169d |
-| Commodity 1v1 exhaustive (Vol=262, exit=0.0) | AvgNet ~5.40%, WR ~87%, AvgHold ~121d |
+| Commodity 1v1 exhaustive (Vol=262, exit=0.0) | ~~AvgNet ~5.40%, WR ~87%, AvgHold ~121d~~ ⚠️ **Mislabelled — register S.** These are NATGAS/BRENT single-pair CT **gross** (vol-scaled), not a universe average. Universe contrarian-top mean at exit=0.0 = **−6.78%** (3/30 positive). Net NATGAS/BRENT CT = **+1.60%**. |
 | NATGAS/BRENT counter-trend (Vol=262, exit=0) | Gross WR 86.7%, Avg net +1.60%, AvgHold 121d |
 | WF equity contrarian scalp (IS=3y, OOS=1y, EXIT=2.0) | ρ=+0.208, p≈0 |
 | WF commodity contrarian (IS=3y, OOS=1y) | ρ=+0.122, p=0.0009 |
@@ -353,6 +354,6 @@ zero bare excepts, zero unjustified broad excepts).
 ## For further context
 
 The Obsidian Project Reference contains the full design decisions log (decisions
-1–89), walk-forward pipeline architecture diagram, paper trading log, all Phase
+1–108), walk-forward pipeline architecture diagram, paper trading log, all Phase
 2–4b experiment tables, open items list, Sprint 3 scope, and the complete code
 quality standard (§17). Consult it before making architectural decisions.

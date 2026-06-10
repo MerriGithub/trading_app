@@ -353,6 +353,28 @@ def render() -> None:
     else:
         st.info(_rho_msg)
 
+    with st.expander("Per-fold breakdown", expanded=False):
+        if not _wf_sum['window_df'].empty:
+            display_df = _wf_sum['window_df'][[
+                'IS_start', 'OOS_end', 'N_pairs',
+                'Spearman_rho', 'p_value', 'OOS_Gross_mean'
+            ]].rename(columns={
+                'IS_start':       'IS Start',
+                'OOS_end':        'OOS End',
+                'N_pairs':        'N Pairs',
+                'Spearman_rho':   'ρ (this fold)',
+                'p_value':        'p',
+                'OOS_Gross_mean': 'OOS AvgGross',
+            })
+            display_df['ρ (this fold)'] = display_df['ρ (this fold)'].map('{:+.3f}'.format)
+            display_df['p']              = display_df['p'].map('{:.3f}'.format)
+            display_df['OOS AvgGross']   = display_df['OOS AvgGross'].map('{:+.4f}'.format)
+            _tbl(display_df, show_index=False)
+            st.caption(
+                "Each row is one IS/OOS fold. "
+                "Aggregate ρ above summarises the IS rank → OOS net relationship across all folds."
+            )
+
     if not _wf_sum['quintile_df'].empty:
         st.subheader("OOS Performance by IS Quintile")
         _q = _wf_sum['quintile_df'].copy()
