@@ -1,0 +1,68 @@
+=== EXECUTION LAG TEST — EQUITY SCALP ===
+Run date:     2026-06-11 22:16
+Lag applied:  CIL (ASX 200) fill prices shifted +1 trading day
+Signal:       unlagged dist_sd (unchanged)
+
+------------------------------------------------------------------------
+PART 1 — UNIVERSE GRID (132 directed pairs)
+Metric                              Baseline      Lagged       Delta
+------------------------------------------------------------------------
+Mean AvgNet_WT                       +0.179%     -0.025%     -0.205%
+Mean NetWR                             66.7%       59.2%       -7.5%
+Mean AvgHold                            8.6d        8.6d        0.0d
+Pairs with trades                    132/132     132/132
+Positive WT pairs                     83/132      62/132
+Zero-trade pairs                           0           0
+
+BestDir=Both subset (Decision 119):
+  Both count                              41          30
+  Mean AvgNet                        +0.570%     +0.374%
+  Mean AvgHold                          6.1d        7.8d
+
+Baseline sanity check vs Decision 118:
+  D118 reference:       +0.380%   pos pairs 58/132
+  This run:             +0.179%   pos pairs 83/132
+  Delta:                -0.201%   [INVESTIGATE]
+
+------------------------------------------------------------------------
+PART 2 — WALK-FORWARD (IS=3y/OOS=1y, contrarian, EXIT_SD=2.0)
+NOTE: conservative lower bound — both signal and fill lagged
+Metric                              Baseline      Lagged
+------------------------------------------------------------------------
+Spearman rho                          +0.208      +0.263
+p-value                              <0.0001      0.0000
+n_obs                                  1,614       1,618
+
+------------------------------------------------------------------------
+PART 3 — WATCHLIST PAIRS
+Pair                  N AvgNet(B) AvgNet(L)     Delta  WR(B)  WR(L) Hold(B) Hold(L)
+------------------------------------------------------------------------
+CTN/CIL             205    +1.04%    -0.15%    -1.19%  85.9%  39.0%    4.8d    4.8d
+CTB/CIL             199    +0.98%    -0.45%    -1.43%  85.9%  33.7%    4.2d    4.2d
+CFR/CIL             125    +0.76%    -0.48%    -1.25%  84.0%  43.2%    7.0d    7.0d
+UKX/CTN             155    +0.50%    +0.50%    +0.00%  68.4%  68.4%    6.9d    6.9d  ←ctrl
+CTN/UKX             162    +0.43%    +0.43%    +0.00%  73.5%  73.5%    7.5d    7.5d  ←ctrl
+
+Control-pair sanity (expect zero delta): PASS
+
+------------------------------------------------------------------------
+PART 4 — BESTDIR=BOTH CONTAMINATION (Decision 119)
+  Original Both pairs:     41  (mean AvgNet +0.570%, mean hold 6.1d)
+  Lagged Both pairs:       30  (mean AvgNet +0.374%, mean hold 7.8d)
+  Dropped → one-dir-only:  1
+  Dropped → zero trades:   0
+  Dropped → both negative: 10
+
+  Contamination verdict: [PARTIAL]
+    GENUINE  = Both count drops <15% AND mean net drops <20%
+    PARTIAL  = Both count drops 15-40% OR mean net drops 20-50%
+    ARTIFACT = Both count drops >40%
+
+------------------------------------------------------------------------
+INTERPRETATION
+  Post-lag AvgNet_WT: -0.025%
+  Gate:
+    >= +0.150%           -> DEPLOY AS PLANNED
+    +0.100% – +0.149%    -> DEPLOY NON-ASX PAIRS ONLY
+    < +0.100%            -> RE-ENGINEER BEFORE FUNDING
+  Verdict: [RE-ENGINEER BEFORE FUNDING]

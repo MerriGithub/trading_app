@@ -1,0 +1,207 @@
+{
+  "run_timestamp": "2026-06-10 18:33:59",
+  "run_duration_seconds": 17.8,
+  "parameters": {
+    "instruments": [
+      "UKX",
+      "CBK",
+      "CEY",
+      "CFR",
+      "CMD",
+      "CEI",
+      "COI",
+      "CRM",
+      "CIL",
+      "CPH",
+      "CTN",
+      "CTB"
+    ],
+    "n_instruments": 12,
+    "xing_sd": 2.0,
+    "vol_window": 262,
+    "target_vol": 0.01,
+    "max_hold_days": 300,
+    "spread_cost_pct": 0.00046166666666666665,
+    "fin_net_daily": 0.00010958904109589041,
+    "n_legs": 2,
+    "wf_is_years": 3,
+    "wf_oos_years": 1,
+    "wf_step_years": 1,
+    "wf_scoring": "contrarian",
+    "wf_spread_cost_pct": 0.001
+  },
+  "task_a": {
+    "exit_sds": [
+      1.6,
+      1.7,
+      1.8,
+      1.9,
+      2.0,
+      2.1,
+      2.2,
+      2.3,
+      2.4,
+      2.5
+    ],
+    "results": [
+      {
+        "exit_sd": 1.6,
+        "n_pairs_with_trades": 132,
+        "total_trades": 7997,
+        "avg_net": 0.0005081381218895404,
+        "net_wr": 0.6922977629854312,
+        "avg_holding": 24.94214366143738,
+        "median_holding": 13.43939393939394,
+        "avg_gross": 0.007821576002021935,
+        "total_ev": 19.448573860653227
+      },
+      {
+        "exit_sd": 1.7,
+        "n_pairs_with_trades": 132,
+        "total_trades": 9165,
+        "avg_net": 0.0012552974884446819,
+        "net_wr": 0.7039436550631486,
+        "avg_holding": 19.96236175429166,
+        "median_holding": 10.06439393939394,
+        "avg_gross": 0.007477276320435548,
+        "total_ev": 26.85034936401444
+      },
+      {
+        "exit_sd": 1.8,
+        "n_pairs_with_trades": 132,
+        "total_trades": 10730,
+        "avg_net": 0.0016990172663707732,
+        "net_wr": 0.7121330981291594,
+        "avg_holding": 15.560639651950327,
+        "median_holding": 7.386363636363637,
+        "avg_gross": 0.0069562350896292926,
+        "total_ev": 33.611107188713234
+      },
+      {
+        "exit_sd": 1.9,
+        "n_pairs_with_trades": 132,
+        "total_trades": 12922,
+        "avg_net": 0.0018979208523016201,
+        "net_wr": 0.7118575770518376,
+        "avg_holding": 11.772702696432768,
+        "median_holding": 5.166666666666667,
+        "avg_gross": 0.006324905918186427,
+        "total_ev": 39.267152668314836
+      },
+      {
+        "exit_sd": 2.0,
+        "n_pairs_with_trades": 132,
+        "total_trades": 16091,
+        "avg_net": 0.001802924145620466,
+        "net_wr": 0.6672888377581393,
+        "avg_holding": 8.565326376350724,
+        "median_holding": 3.496212121212121,
+        "avg_gross": 0.00552692262080236,
+        "total_ev": 42.1046664741166
+      },
+      {
+        "exit_sd": 2.1,
+        "n_pairs_with_trades": 132,
+        "total_trades": 20474,
+        "avg_net": 0.0014342869261035796,
+        "net_wr": 0.5882021502811972,
+        "avg_holding": 6.069424661673812,
+        "median_holding": 2.337121212121212,
+        "avg_gross": 0.004611238450123411,
+        "total_ev": 38.845099010703535
+      },
+      {
+        "exit_sd": 2.2,
+        "n_pairs_with_trades": 132,
+        "total_trades": 25484,
+        "avg_net": 0.0010548659547512853,
+        "net_wr": 0.5327243779330594,
+        "avg_holding": 4.454234646511735,
+        "median_holding": 1.2424242424242424,
+        "avg_gross": 0.0038778032288725797,
+        "total_ev": 32.75754247413711
+      },
+      {
+        "exit_sd": 2.3,
+        "n_pairs_with_trades": 132,
+        "total_trades": 30225,
+        "avg_net": 0.0007046669108590115,
+        "net_wr": 0.4948204489798341,
+        "avg_holding": 3.4760997182224185,
+        "median_holding": 1.0,
+        "avg_gross": 0.0033132184472730577,
+        "total_ev": 24.161463545561496
+      },
+      {
+        "exit_sd": 2.4,
+        "n_pairs_with_trades": 132,
+        "total_trades": 34347,
+        "avg_net": 0.00044684220020636166,
+        "net_wr": 0.4745827021740998,
+        "avg_holding": 2.8716143177476354,
+        "median_holding": 1.0,
+        "avg_gross": 0.0029229037858314144,
+        "total_ev": 16.499099432580568
+      },
+      {
+        "exit_sd": 2.5,
+        "n_pairs_with_trades": 132,
+        "total_trades": 37774,
+        "avg_net": 0.00018993193272843876,
+        "net_wr": 0.45779452462993,
+        "avg_holding": 2.4838288513858964,
+        "median_holding": 1.0,
+        "avg_gross": 0.00258099944353448,
+        "total_ev": 7.343889928278067
+      }
+    ],
+    "verdict": "PLATEAU CONFIRMED \u2014 avg_net stable from EXIT_SD 1.7\u20132.0 (min lower = 0.126%, peak = 0.180%). EXIT_SD=2.0 is robust."
+  },
+  "task_b": {
+    "exit_sds": [
+      1.5,
+      1.8,
+      2.0
+    ],
+    "results": [
+      {
+        "exit_sd": 1.5,
+        "rho": 0.0879,
+        "p_value": 0.0005,
+        "n_obs": 1551,
+        "q1_mean": 0.0066,
+        "q5_mean": 0.0084,
+        "t_stat": -0.879,
+        "t_p": 0.3795,
+        "significant": true,
+        "elapsed_s": 0.7
+      },
+      {
+        "exit_sd": 1.8,
+        "rho": 0.1172,
+        "p_value": 0.0,
+        "n_obs": 1600,
+        "q1_mean": 0.0036,
+        "q5_mean": 0.0072,
+        "t_stat": -1.968,
+        "t_p": 0.0495,
+        "significant": true,
+        "elapsed_s": 0.6
+      },
+      {
+        "exit_sd": 2.0,
+        "rho": 0.2084,
+        "p_value": 0.0,
+        "n_obs": 1614,
+        "q1_mean": 0.0027,
+        "q5_mean": 0.0069,
+        "t_stat": -3.066,
+        "t_p": 0.0023,
+        "significant": true,
+        "elapsed_s": 0.6
+      }
+    ],
+    "verdict": "STABLE PLATEAU \u2014 WF \u03c1 significantly positive at all EXIT_SD values. 1.5: \u03c1=0.088, p=0.0005 (\u2713 sig)  |  1.8: \u03c1=0.117, p=0.0000 (\u2713 sig)  |  2.0: \u03c1=0.208, p=0.0000 (\u2713 sig). Parameter region is robust."
+  },
+  "n_trading_days_loaded": 7095
+}

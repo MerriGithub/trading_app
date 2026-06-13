@@ -1,0 +1,41 @@
+[Fable5-Q5] Hard Stop Grid Re-run at EXIT_SD=2.0
+Generated: 2026-06-13T15:00:43.992712
+Purpose: Validate equity hard stop at production EXIT_SD=2.0 (Phase 5a used EXIT_SD=0.0 — Decision 121).
+CIL excluded (Decision 122). Grid: [3.0, 3.5, 4.0] SD.
+
+══════════════════════════════════════════════════════════════════════
+[Fable5-Q5] HARD STOP GRID RE-RUN — EQUITIES_EXIT2
+XING_SD=2.0  EXIT_SD=2.0  VOL=262  Pairs analysed: 90
+Excluded: ['CIL', 'CMD']  Stop grid: [3.0, 3.5, 4.0]
+Reference: Phase 5a reference (EXIT_SD=0.0): optimum = 3.5 SD, EV_delta = -0.09%, stop rate = 11.6%
+══════════════════════════════════════════════════════════════════════
+
+BASELINE (no hard stop):
+  Total pairs: 90  |  Total trades: 10,494  |  Win rate: 81.4%
+  Avg gross/trade: +0.531%  |  Avg net/trade: +0.331%  |  Total EV: 0.28%
+
+MAE DISTRIBUTION (SD units from entry, no stop):
+                      Winners (n=8,544)    Losers (n=1,950)
+  p10 :                1.64               2.18
+  p25 :                1.85               2.40
+  p50 :                2.02               2.77
+  p75 :                2.29               3.22
+  p90 :                2.64               3.88
+  p95 :                2.94               4.37
+  p99 :                3.68               6.06
+
+  % of WINNERS with MAE exceeding each stop level:
+  3.0 SD:  4.1%   3.5 SD:  1.3%   4.0 SD:  0.5%
+
+STOP GRID RESULTS:
+  stop_sd  trades  WR%    AvgNet%    TotalEV   StopRate%   EV_delta   Flag
+  3.0      14,913  67.7   +0.110     0.10      30.0        -0.19      
+  3.5      12,042  75.5   +0.229     0.20      12.9        -0.08      
+  4.0      11,105  79.0   +0.275     0.24      5.5         -0.05      
+
+RECOMMENDATION:
+  Optimal hard stop at EXIT_SD=2.0: 3.5 SD  (first level where EV_delta ≥ -0.10; stop rate 12.9%)
+  ✅ Consistent with Phase 5a (3.5 SD) — HARD_STOP_SD['equities'] in tabs/shared.py confirmed.
+
+NEXT STEP: Update Decision 121 in Obsidian Project Reference with result and close [Fable5-Q5] open item.
+

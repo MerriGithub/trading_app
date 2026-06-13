@@ -171,6 +171,8 @@ data/scan_history/        # Per-run archived results (YYYY-MM-DD_HHMM.json)
 
 **Navigation:** always use `st.session_state['sidebar_nav_pending']`, never write
 `sidebar_nav` directly — crashes on rerun (register item B).
+**Emoji required:** sidebar entry strings include emojis (e.g. `'📈 Pair Analysis'`);
+plain strings silently fail to match — navigation never fires (register item R).
 
 ### Config split — important
 
@@ -254,6 +256,11 @@ capital = (cfd_min / contracts_raw) × target_1sd   # CORRECT — currency-agnos
 | `data/walkforward_cache.json` | Walk-forward result cache |
 | `data/watchlist.json` | Saved watchlists; includes `scoring_mode` field |
 
+⚠️ **positions.json nesting** (register item Q): instruments are at
+`pos['basket']['long_legs'][0]` and `pos['basket']['short_legs'][0]`.
+Top-level keys `long_instrument`, `long`, `short`, `short_instrument` do **not**
+exist — accessing them returns a silent `''` rather than raising an error.
+
 ### Price data conventions
 
 - Daily prices: `ffill(limit=3)` to bridge short holiday gaps.
@@ -291,6 +298,8 @@ commodity benchmarks for comparison.
 | WF equity contrarian scalp (IS=3y, OOS=1y, EXIT=2.0) | ρ=+0.208, p≈0 |
 | WF commodity contrarian (IS=3y, OOS=1y) | ρ=+0.122, p=0.0009 |
 | WF Equity×FX contrarian (IS=5y, OOS=3y) | ρ=+0.053, p=0.0030 |
+| Phase 3.1 commodity (EXIT_SD=0.5) | total_EV=7.37, avg_net=+1.137%, avg_hold=104d |
+| Phase 4b equity scalp (EXIT_SD=2.0) | total_EV=+83.87, avg_hold=8d, win_rate=74.8% |
 
 ---
 

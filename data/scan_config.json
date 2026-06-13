@@ -1,0 +1,177 @@
+{
+  "searches": [
+    {
+      "id": "equity_search1",
+      "name": "Equity Scalp (Phase 4b confirmed)",
+      "description": "EXIT_SD=2.0 confirmed Phase 4b optimum. WF rho=+0.208, p~0. Avg hold 8d.",
+      "asset_class": "equity",
+      "enabled": true,
+      "research_basis": "Phase 4b 2026-06-02: total_EV=+83.87, WF rho=+0.208, p~0",
+      "algo_params": {
+        "xing_sd": 2.0,
+        "exit_sd": 2.0,
+        "vol_window": 262,
+        "trend_window": 262,
+        "trend_mode": "Both passes",
+        "history_days": null
+      },
+      "scan_params": {
+        "min_wt_trades": 8,
+        "min_avg_net_wt": 0.0,
+        "top_n_for_wf": 10,
+        "broker_profile": "ig_spreadbet"
+      },
+      "wf_params": {
+        "is_years": 3,
+        "oos_years": 2,
+        "step_years": 1,
+        "scoring_mode": "contrarian",
+        "min_rho": 0.05,
+        "max_p": 0.10
+      },
+      "exclude": []
+    },
+    {
+      "id": "equity_search2",
+      "name": "Equity Scalp Variant (placeholder)",
+      "description": "Placeholder for second equity parameter set. Do not enable until WF validated.",
+      "asset_class": "equity",
+      "enabled": false,
+      "research_basis": "Not yet researched.",
+      "algo_params": {
+        "xing_sd": 2.0,
+        "exit_sd": 1.5,
+        "vol_window": 262,
+        "trend_window": 262,
+        "trend_mode": "Both passes",
+        "history_days": null
+      },
+      "scan_params": {
+        "min_wt_trades": 8,
+        "min_avg_net_wt": 0.0,
+        "top_n_for_wf": 10,
+        "broker_profile": "ig_spreadbet"
+      },
+      "wf_params": {
+        "is_years": 3,
+        "oos_years": 2,
+        "step_years": 1,
+        "scoring_mode": "contrarian",
+        "min_rho": 0.05,
+        "max_p": 0.10
+      },
+      "exclude": []
+    },
+    {
+      "id": "commodity_search1",
+      "name": "Commodity Mean Reversion (Phase 3 confirmed)",
+      "description": "EXIT_SD=0.5 confirmed Phase 3 optimum. WF rho=+0.122. Avg hold 104d.",
+      "asset_class": "commodities",
+      "enabled": true,
+      "research_basis": "Phase 3 2026-06-02: total_EV=7.37, avg_net=+1.137%, WF rho=+0.122",
+      "algo_params": {
+        "xing_sd": 2.0,
+        "exit_sd": 0.5,
+        "vol_window": 262,
+        "trend_window": 262,
+        "trend_mode": "Both passes",
+        "history_days": null
+      },
+      "scan_params": {
+        "min_wt_trades": 8,
+        "min_avg_net_wt": 0.0,
+        "top_n_for_wf": 10,
+        "broker_profile": "ig_spreadbet"
+      },
+      "wf_params": {
+        "is_years": 3,
+        "oos_years": 1,
+        "step_years": 1,
+        "scoring_mode": "contrarian",
+        "min_rho": 0.05,
+        "max_p": 0.10
+      },
+      "exclude": ["WTI"]
+    },
+    {
+      "id": "equity_x_fx_search1",
+      "name": "Equity x FX Cross-Asset (contrarian)",
+      "description": "Cross-asset contrarian validated. WF rho=+0.053, p=0.0030.",
+      "asset_class": "cross_asset",
+      "long_asset_class": "equity",
+      "short_asset_class": "fx",
+      "enabled": false,
+      "research_basis": "WF validated 2026-05-25: rho=+0.053, p=0.0030",
+      "algo_params": {
+        "xing_sd": 2.0,
+        "exit_sd": 2.0,
+        "vol_window": 262,
+        "trend_window": 262,
+        "trend_mode": "Both passes",
+        "history_days": null
+      },
+      "scan_params": {
+        "min_wt_trades": 5,
+        "min_avg_net_wt": 0.0,
+        "top_n_for_wf": 10,
+        "broker_profile": "ig_spreadbet"
+      },
+      "wf_params": {
+        "is_years": 5,
+        "oos_years": 3,
+        "step_years": 1,
+        "scoring_mode": "contrarian",
+        "min_rho": 0.05,
+        "max_p": 0.10
+      },
+      "exclude": []
+    },
+    {
+      "id": "fx_search1",
+      "name": "FX Pairs (BLOCKED)",
+      "description": "Net negative at all EXIT_SD values at CFD/spreadbet rates.",
+      "asset_class": "fx",
+      "enabled": false,
+      "blocked_reason": "Net negative avg_net at all EXIT_SD (Phase 4 best: -0.160%/trade at EXIT_SD=1.5). Viable only at futures/repo rates. Revisit if cost structure changes.",
+      "algo_params": {"xing_sd": 2.0, "exit_sd": 1.5, "vol_window": 262, "trend_window": 262, "trend_mode": "Both passes", "history_days": null},
+      "scan_params": {"min_wt_trades": 8, "min_avg_net_wt": 0.0, "top_n_for_wf": 10, "broker_profile": "ig_spreadbet"},
+      "wf_params": {"is_years": 3, "oos_years": 1, "step_years": 1, "scoring_mode": "composite", "min_rho": 0.05, "max_p": 0.10},
+      "exclude": []
+    },
+    {
+      "id": "fi_search1",
+      "name": "Fixed Income (BLOCKED)",
+      "description": "Net negative at all EXIT_SD values at CFD/spreadbet rates.",
+      "asset_class": "fixed_income",
+      "enabled": false,
+      "blocked_reason": "Net negative avg_net at all EXIT_SD (Phase 4 best: -0.174%/trade). Viable only at futures/repo rates.",
+      "algo_params": {"xing_sd": 2.0, "exit_sd": 1.5, "vol_window": 262, "trend_window": 262, "trend_mode": "Both passes", "history_days": null},
+      "scan_params": {"min_wt_trades": 8, "min_avg_net_wt": 0.0, "top_n_for_wf": 10, "broker_profile": "ig_spreadbet"},
+      "wf_params": {"is_years": 3, "oos_years": 1, "step_years": 1, "scoring_mode": "composite", "min_rho": 0.05, "max_p": 0.10},
+      "exclude": ["IBTM", "UST10Y", "UST30Y", "UST5Y"]
+    },
+    {
+      "id": "crypto_search1",
+      "name": "Crypto (BLOCKED - Phase 6)",
+      "description": "Not yet researched. Multiple blockers require a dedicated phase.",
+      "asset_class": "crypto",
+      "enabled": false,
+      "blocked_reason": "Four blockers: (1) Yahoo Finance crypto data gaps need dedicated fetch module. (2) Daily vol 5-10% makes vol-scaling produce near-zero positions. (3) CFD funding rates 0.02-0.05%/day incompatible with account.json model. (4) Crypto pairs correlate in risk-off — violates spread stationarity. Revisit as Phase 6 after Phase 5 (hard stops) complete.",
+      "algo_params": {},
+      "scan_params": {},
+      "wf_params": {},
+      "exclude": []
+    }
+  ],
+  "global_settings": {
+    "spread_cost_pct_fallback": 0.001,
+    "target_vol": 0.01,
+    "ai_review_enabled": true,
+    "ai_review_model": "claude-sonnet-4-6",
+    "ai_max_tokens": 1000,
+    "obsidian_output_enabled": true,
+    "obsidian_notes_path": "C:/Users/gordo/Google Drive Streaming/.shortcut-targets-by-id/1lIIeHMZyWhQmYyhjk4AacJUByZClFbiv/Merri-Obsidian-KB/Notes",
+    "top_candidates_for_report": 5,
+    "near_signal_buffer_sd": 0.3
+  }
+}

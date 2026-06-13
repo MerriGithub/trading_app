@@ -1,0 +1,4 @@
+exit_sd,baseline_n_trades,baseline_gross_wr,baseline_net_wr,baseline_avg_net,baseline_avg_holding,best_cb,best_n_trades,best_gross_wr,best_net_wr,best_avg_net,best_avg_holding,delta_avg_net,delta_net_wr,delta_gross_wr
+1.5,52.1818,0.7768,0.6334,-0.0033,31.3813,0,52.1818,0.7768,0.6334,-0.0033,31.3813,0.0,0.0,0.0
+1.8,79.0152,0.8157,0.6488,-0.0007,15.7648,0,79.0152,0.8157,0.6488,-0.0007,15.7648,0.0,0.0,0.0
+2.0,119.0909,0.8133,0.5428,-0.0005,8.6434,0,119.0909,0.8133,0.5428,-0.0005,8.6434,0.0,0.0,0.0

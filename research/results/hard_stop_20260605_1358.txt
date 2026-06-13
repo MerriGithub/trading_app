@@ -1,0 +1,74 @@
+Hard Stop Analysis — generated 2026-06-05T13:58:58.191813
+Research optimums: Commodities EXIT_SD=0.5, Equities EXIT_SD=2.0
+
+═══════════════════════════════════════════════════════════════
+HARD STOP ANALYSIS — EQUITIES
+XING_SD=2.0  EXIT_SD=2.0  VOL=262  Pairs analysed: 132
+═══════════════════════════════════════════════════════════════
+
+BASELINE (no hard stop):
+  Total pairs: 132  |  Total trades: 16,072  |  Win rate: 83.0%
+  Avg gross/trade: +0.624%  |  Avg net/trade: +0.424%  |  Total EV: 0.35
+
+MAE DISTRIBUTION (SD units from entry):
+                      Winners (n=13,336)    Losers (n=2,736)
+  p10 :                1.59               2.18
+  p25 :                1.83               2.41
+  p50 :                2.01               2.76
+  p75 :                2.29               3.22
+  p90 :                2.64               3.85
+  p95 :                2.92               4.38
+  p99 :                3.62               5.82
+
+  % of WINNERS with MAE exceeding each stop level:
+  2.5 SD: 14.5%   3.0 SD:  4.1%   3.5 SD:  1.3%
+  4.0 SD:  0.4%   4.5 SD:  0.2%   5.0 SD:  0.1%
+
+STOP GRID RESULTS:
+  stop_sd  trades  WR%    AvgNet%    TotalEV   StopRate%   EV_delta   Flag
+  2.5      33,899  58.5   +0.010     0.01      54.2        -0.35      
+  3.0      22,176  69.9   +0.177     0.15      27.9        -0.21      
+  3.5      18,156  77.6   +0.313     0.26      11.6        -0.09      
+  4.0      16,849  80.9   +0.368     0.30      4.6         -0.05      
+  4.5      16,399  82.1   +0.395     0.33      2.0         -0.03      ℹ operationally irrelevant
+  5.0      16,219  82.6   +0.409     0.34      0.9         -0.01      ℹ operationally irrelevant
+
+RECOMMENDATION:
+  Optimal hard stop: 3.5 SD  (first level where EV_delta ≥ -0.10; stop rate 11.6%)
+
+
+═══════════════════════════════════════════════════════════════
+HARD STOP ANALYSIS — COMMODITIES
+XING_SD=2.0  EXIT_SD=0.5  VOL=262  Pairs analysed: 132
+═══════════════════════════════════════════════════════════════
+
+BASELINE (no hard stop):
+  Total pairs: 132  |  Total trades: 2,966  |  Win rate: 73.8%
+  Avg gross/trade: +1.163%  |  Avg net/trade: +0.963%  |  Total EV: 0.77
+
+MAE DISTRIBUTION (SD units from entry):
+                      Winners (n=2,190)    Losers (n=776)
+  p10 :                1.96               2.51
+  p25 :                2.20               2.87
+  p50 :                2.54               3.28
+  p75 :                3.01               3.83
+  p90 :                3.50               4.37
+  p95 :                3.82               4.67
+  p99 :                4.54               5.31
+
+  % of WINNERS with MAE exceeding each stop level:
+  2.5 SD: 52.9%   3.0 SD: 25.3%   3.5 SD: 10.0%
+  4.0 SD:  3.4%   4.5 SD:  1.1%   5.0 SD:  0.3%
+
+STOP GRID RESULTS:
+  stop_sd  trades  WR%    AvgNet%    TotalEV   StopRate%   EV_delta   Flag
+  2.5      19,719  38.7   -0.115     -0.10     85.6        -0.87      ⚠ cuts winners
+  3.0      8,948   44.0   +0.048     0.08      67.2        -0.69      ⚠ cuts winners
+  3.5      4,914   55.4   +0.338     0.35      39.8        -0.42      
+  4.0      3,544   66.1   +0.653     0.55      16.4        -0.22      
+  4.5      3,137   71.4   +0.829     0.66      5.5         -0.11      
+  5.0      3,005   73.3   +0.946     0.76      1.3         -0.01      ℹ operationally irrelevant
+
+RECOMMENDATION:
+  Optimal hard stop: 5.0 SD  (first level where EV_delta ≥ -0.10; stop rate 1.3%)
+

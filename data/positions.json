@@ -54,10 +54,13 @@
     },
     "target_exposure": 250.0,
     "comments": "",
-    "status": "open",
-    "exit_date": null,
-    "exit_prices": {},
-    "realised_pnl": 0.0,
-    "pct_open": 1.0
+    "status": "closed",
+    "exit_date": "2026-06-13",
+    "exit_prices": {
+      "CIL": 8804.0,
+      "CBK": 8350.8701171875
+    },
+    "realised_pnl": -89.82190429687506,
+    "pct_open": 0.0
   }
 ]
